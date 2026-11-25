@@ -1,0 +1,316 @@
+{
+  "entities": {
+    "SiteSettings": {
+      "title": "Site Settings",
+      "description": "Company contact details, WhatsApp dispatch number, M-Pesa Paybill details, and VAT configuration.",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string", "maxLength": 100 },
+        "phoneDisplay": { "type": "string", "maxLength": 30 },
+        "whatsappNumber": { "type": "string", "maxLength": 20, "pattern": "^[0-9]{10,15}$" },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 200 },
+        "mpesaPaybill": { "type": "string", "maxLength": 20 },
+        "mpesaAccount": { "type": "string", "maxLength": 30 },
+        "vatEnabled": { "type": "boolean" },
+        "vatRatePercent": { "type": "number" },
+        "chauffeurDailyFeeKes": { "type": "number", "description": "Standard daily driver allowance in KES added to vehicle base rates." },
+        "dispatchHours": { "type": "string", "maxLength": 100 },
+        "kraPin": { "type": "string", "maxLength": 30 },
+        "bankDetails": { "type": "string", "maxLength": 200 },
+        "bookingTermsSummary": { "type": "string", "maxLength": 400 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyName", "phoneDisplay", "whatsappNumber", "email", "address", "mpesaPaybill", "mpesaAccount", "vatEnabled", "vatRatePercent", "updatedAt"]
+    },
+    "StaffMember": {
+      "title": "Staff Member",
+      "description": "Authorized Kechas Agencies portal staff account with assigned role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "dispatcher"] },
+        "status": { "type": "string", "enum": ["active", "disabled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "fullName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "StaffInvite": {
+      "title": "Staff Invite",
+      "description": "Pre-authorized staff email invite defining role before first Google sign-in.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "dispatcher"] },
+        "invitedBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "fullName", "role", "invitedBy", "createdAt"]
+    },
+    "Vehicle": {
+      "title": "Fleet Vehicle",
+      "description": "Vehicle record with Kisumu rates, odometer, compliance dates, and operational status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 80 },
+        "name": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "enum": ["executive", "4x4-safari", "family-group", "economy"] },
+        "categoryLabel": { "type": "string", "maxLength": 50 },
+        "registrationPlate": { "type": "string", "maxLength": 20 },
+        "dailyRateKes": { "type": "number" },
+        "selfDriveRateKes": { "type": "number" },
+        "selfDriveAvailable": { "type": "boolean" },
+        "chauffeurAvailable": { "type": "boolean" },
+        "passengers": { "type": "number" },
+        "luggage": { "type": "number" },
+        "transmission": { "type": "string", "maxLength": 40 },
+        "fuelType": { "type": "string", "maxLength": 20 },
+        "terrain": { "type": "string", "maxLength": 160 },
+        "highlight": { "type": "string", "maxLength": 500 },
+        "image": { "type": "string", "maxLength": 350000 },
+        "currentOdometerKm": { "type": "number" },
+        "nextServiceKm": { "type": "number" },
+        "nextServiceDate": { "type": "string", "maxLength": 20 },
+        "insuranceExpiryDate": { "type": "string", "maxLength": 20 },
+        "ntsaExpiryDate": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["Available", "Booked", "In Maintenance", "Inactive"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "categoryLabel", "registrationPlate", "dailyRateKes", "selfDriveRateKes", "selfDriveAvailable", "chauffeurAvailable", "passengers", "luggage", "transmission", "fuelType", "terrain", "highlight", "image", "currentOdometerKm", "nextServiceKm", "nextServiceDate", "insuranceExpiryDate", "ntsaExpiryDate", "status", "updatedAt"]
+    },
+    "MaintenanceLog": {
+      "title": "Maintenance Log",
+      "description": "Service and compliance record for a fleet vehicle.",
+      "type": "object",
+      "properties": {
+        "vehicleId": { "type": "string", "maxLength": 80 },
+        "vehicleName": { "type": "string", "maxLength": 100 },
+        "registrationPlate": { "type": "string", "maxLength": 20 },
+        "serviceDate": { "type": "string", "maxLength": 20 },
+        "odometerKm": { "type": "number" },
+        "costKes": { "type": "number" },
+        "partsReplaced": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "nextDueKm": { "type": "number" },
+        "nextDueDate": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vehicleId", "vehicleName", "registrationPlate", "serviceDate", "odometerKm", "costKes", "partsReplaced", "createdAt"]
+    },
+    "Driver": {
+      "title": "Chauffeur Driver",
+      "description": "Company chauffeur record including licensing, assigned vehicle, and specialties.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "nationalId": { "type": "string", "maxLength": 30 },
+        "licenseNumber": { "type": "string", "maxLength": 40 },
+        "licenseExpiryDate": { "type": "string", "maxLength": 20 },
+        "assignedVehicleId": { "type": "string", "maxLength": 80 },
+        "assignedVehicleName": { "type": "string", "maxLength": 100 },
+        "specialties": { "type": "string", "maxLength": 250 },
+        "status": { "type": "string", "enum": ["Available", "On Trip", "Off Duty"] },
+        "tripCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "phone", "nationalId", "licenseNumber", "licenseExpiryDate", "specialties", "status", "tripCount", "createdAt", "updatedAt"]
+    },
+    "Booking": {
+      "title": "Booking Reservation",
+      "description": "Car hire or airport transfer booking with assignment, checklists, and payment summary.",
+      "type": "object",
+      "properties": {
+        "bookingRef": { "type": "string", "maxLength": 30 },
+        "serviceType": { "type": "string", "enum": ["chauffeur", "self-drive", "airport-transfer"] },
+        "vehicleId": { "type": "string", "maxLength": 80 },
+        "vehicleName": { "type": "string", "maxLength": 100 },
+        "registrationPlate": { "type": "string", "maxLength": 20 },
+        "driverId": { "type": "string", "maxLength": 80 },
+        "driverName": { "type": "string", "maxLength": 100 },
+        "driverPhone": { "type": "string", "maxLength": 30 },
+        "pickupLocation": { "type": "string", "maxLength": 200 },
+        "destination": { "type": "string", "maxLength": 200 },
+        "pickupDate": { "type": "string", "maxLength": 20 },
+        "pickupTime": { "type": "string", "maxLength": 20 },
+        "returnDate": { "type": "string", "maxLength": 20 },
+        "returnTime": { "type": "string", "maxLength": 20 },
+        "rentalDays": { "type": "number" },
+        "flightNumber": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "clientName": { "type": "string", "maxLength": 120 },
+        "clientPhone": { "type": "string", "maxLength": 30 },
+        "clientEmail": { "type": "string", "maxLength": 120 },
+        "quotedAmountKes": { "type": "number" },
+        "amountPaidKes": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Unpaid", "Deposit Paid", "Paid in Full"] },
+        "status": { "type": "string", "enum": ["Pending", "Confirmed", "Active", "Completed", "Cancelled"] },
+        "source": { "type": "string", "enum": ["Online", "WhatsApp", "Walk-In", "Phone"] },
+        "odometerOut": { "type": "number" },
+        "fuelOut": { "type": "string", "maxLength": 40 },
+        "conditionOut": { "type": "string", "maxLength": 300 },
+        "handoverPassedItems": { "type": "array", "description": "Passed departure inspection item IDs (max 8)." },
+        "handoverFlaggedItems": { "type": "array", "description": "Flagged departure inspection item IDs (max 8)." },
+        "handoverCompletedBy": { "type": "string", "maxLength": 120 },
+        "handoverCompletedAt": { "type": "string", "maxLength": 40 },
+        "odometerIn": { "type": "number" },
+        "fuelIn": { "type": "string", "maxLength": 40 },
+        "damageNotes": { "type": "string", "maxLength": 300 },
+        "returnPassedItems": { "type": "array", "description": "Passed return inspection item IDs (max 8)." },
+        "returnFlaggedItems": { "type": "array", "description": "Flagged return inspection item IDs (max 8)." },
+        "returnCompletedBy": { "type": "string", "maxLength": 120 },
+        "returnCompletedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bookingRef", "serviceType", "vehicleId", "vehicleName", "pickupLocation", "destination", "pickupDate", "pickupTime", "returnDate", "returnTime", "rentalDays", "clientName", "clientPhone", "quotedAmountKes", "amountPaidKes", "paymentStatus", "status", "source", "createdAt", "updatedAt"]
+    },
+    "Transaction": {
+      "title": "Financial Transaction",
+      "description": "Recorded payment or corporate invoice settlement linked to a booking.",
+      "type": "object",
+      "properties": {
+        "bookingId": { "type": "string", "maxLength": 80 },
+        "bookingRef": { "type": "string", "maxLength": 30 },
+        "clientName": { "type": "string", "maxLength": 120 },
+        "clientType": { "type": "string", "maxLength": 40 },
+        "method": { "type": "string", "enum": ["M-Pesa Paybill/STK", "Bank Transfer", "Cash", "Corporate/NGO Monthly Invoice"] },
+        "mpesaCode": { "type": "string", "maxLength": 40 },
+        "amountKes": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 300 },
+        "paidAt": { "type": "string", "maxLength": 30 },
+        "recordedByEmail": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["bookingId", "bookingRef", "clientName", "method", "amountKes", "paidAt", "recordedByEmail", "createdAt"]
+    },
+    "ClientAccount": {
+      "title": "Client Account",
+      "description": "CRM record for individual, diaspora, tourist, or NGO/corporate clients.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 120 },
+        "accountType": { "type": "string", "enum": ["Individual / Diaspora", "Tourist", "Corporate / NGO"] },
+        "idOrPassport": { "type": "string", "maxLength": 40 },
+        "kraPin": { "type": "string", "maxLength": 30 },
+        "organization": { "type": "string", "maxLength": 120 },
+        "totalTrips": { "type": "number" },
+        "totalSpendKes": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "accountType", "totalTrips", "totalSpendKes", "createdAt", "updatedAt"]
+    },
+    "JournalPost": {
+      "title": "Journal Post",
+      "description": "Public editorial travel and field logistics article.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 60 },
+        "publishedAt": { "type": "string", "maxLength": 40 },
+        "readTime": { "type": "string", "maxLength": 30 },
+        "image": { "type": "string", "maxLength": 300 },
+        "excerpt": { "type": "string", "maxLength": 500 },
+        "body": { "type": "string", "maxLength": 8000 },
+        "recommendedRouteSlug": { "type": "string", "maxLength": 100 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slug", "title", "category", "publishedAt", "readTime", "image", "excerpt", "body", "updatedAt"]
+    },
+    "DestinationItem": {
+      "title": "Destination Route Guide",
+      "description": "Regional route guide displayed on Destinations and Home pages.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 120 },
+        "county": { "type": "string", "maxLength": 80 },
+        "distanceFromKisumu": { "type": "string", "maxLength": 100 },
+        "driveTime": { "type": "string", "maxLength": 80 },
+        "recommendedVehicle": { "type": "string", "maxLength": 120 },
+        "recommendedVehicleId": { "type": "string", "maxLength": 80 },
+        "image": { "type": "string", "maxLength": 300 },
+        "summary": { "type": "string", "maxLength": 500 },
+        "roadConditions": { "type": "string", "maxLength": 800 },
+        "localTipsText": { "type": "string", "maxLength": 1000 },
+        "featuredOnHome": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slug", "name", "county", "distanceFromKisumu", "driveTime", "recommendedVehicle", "recommendedVehicleId", "image", "summary", "roadConditions", "featuredOnHome", "updatedAt"]
+    },
+    "TestimonialItem": {
+      "title": "Client Testimonial",
+      "description": "Editorial client review shown on the homepage.",
+      "type": "object",
+      "properties": {
+        "quote": { "type": "string", "maxLength": 600 },
+        "clientName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "maxLength": 100 },
+        "context": { "type": "string", "maxLength": 140 },
+        "route": { "type": "string", "maxLength": 100 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quote", "clientName", "role", "context", "route", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Global site settings document (id: site)."
+    },
+    "/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Authorized staff accounts keyed by Firebase Auth UID."
+    },
+    "/staff_invites/{emailKey}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Pending and active staff role invitations keyed by lowercase email."
+    },
+    "/vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Fleet vehicles inventory and compliance metadata."
+    },
+    "/maintenance_logs/{logId}": {
+      "schema": { "$ref": "#/entities/MaintenanceLog" },
+      "description": "Vehicle maintenance and service logs."
+    },
+    "/drivers/{driverId}": {
+      "schema": { "$ref": "#/entities/Driver" },
+      "description": "Company chauffeurs directory."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Customer bookings and dispatch workflow records."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Financial transactions and M-Pesa/invoice settlements."
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/ClientAccount" },
+      "description": "Clients and corporate/NGO CRM accounts."
+    },
+    "/journal/{articleId}": {
+      "schema": { "$ref": "#/entities/JournalPost" },
+      "description": "Public editorial journal articles."
+    },
+    "/destinations/{destId}": {
+      "schema": { "$ref": "#/entities/DestinationItem" },
+      "description": "Regional route guides."
+    },
+    "/testimonials/{testimonialId}": {
+      "schema": { "$ref": "#/entities/TestimonialItem" },
+      "description": "Homepage client testimonials."
+    }
+  }
+}

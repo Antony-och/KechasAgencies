@@ -1,0 +1,544 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidEmailId(id) {
+      return id is string && id.size() >= 5 && id.size() <= 160 && id.matches('^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'antonyonyi75@gmail.com';
+    }
+
+    function staffDocExists() {
+      return isVerifiedUser() && exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+    }
+
+    function staffData() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() || (staffDocExists() && staffData().status == 'active' && staffData().role == 'admin');
+    }
+
+    function isStaff() {
+      return isBootstrapAdmin() || (staffDocExists() && staffData().status == 'active' && staffData().role in ['admin', 'dispatcher']);
+    }
+
+    function isNonEmptyString(val, maxLen) {
+      return val is string && val.size() >= 1 && val.size() <= maxLen;
+    }
+
+    function isOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isOptionalNumber(data, key, minVal) {
+      return !(key in data) || (data[key] is number && data[key] >= minVal);
+    }
+
+    function isOptionalInspectionList(data, key) {
+      return !(key in data) || (
+        data[key] is list
+        && data[key].size() <= 8
+        && (data[key].size() == 0 || (
+          data[key][0] is string
+          && data[key].hasOnly([
+            'exterior', 'glass', 'lights', 'tyres_spare',
+            'interior_ac', 'safety_kit', 'documents', 'keys_fuel_card'
+          ])
+        ))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidSiteSettings(data) {
+      return data.keys().hasAll([
+        'companyName', 'phoneDisplay', 'whatsappNumber', 'email', 'address',
+        'mpesaPaybill', 'mpesaAccount', 'vatEnabled', 'vatRatePercent', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'companyName', 'phoneDisplay', 'whatsappNumber', 'email', 'address',
+        'mpesaPaybill', 'mpesaAccount', 'vatEnabled', 'vatRatePercent', 'chauffeurDailyFeeKes',
+        'selfDriveDepositMode', 'selfDriveDepositMultiplier', 'selfDriveDepositMinKes',
+        'selfDriveDepositFixedKes', 'dispatchHours', 'kraPin', 'bankDetails',
+        'bookingTermsSummary', 'updatedAt'
+      ])
+      && isNonEmptyString(data.companyName, 100)
+      && isNonEmptyString(data.phoneDisplay, 30)
+      && isNonEmptyString(data.whatsappNumber, 20) && data.whatsappNumber.matches('^[0-9]{10,15}$')
+      && isNonEmptyString(data.email, 120)
+      && isNonEmptyString(data.address, 200)
+      && isNonEmptyString(data.mpesaPaybill, 20)
+      && isNonEmptyString(data.mpesaAccount, 30)
+      && data.vatEnabled is bool
+      && data.vatRatePercent is number && data.vatRatePercent >= 0 && data.vatRatePercent <= 30
+      && (!('chauffeurDailyFeeKes' in data) || (data.chauffeurDailyFeeKes is number && data.chauffeurDailyFeeKes >= 0 && data.chauffeurDailyFeeKes <= 100000))
+      && (!('selfDriveDepositMode' in data) || data.selfDriveDepositMode in ['multiplier', 'fixed'])
+      && (!('selfDriveDepositMultiplier' in data) || (data.selfDriveDepositMultiplier is number && data.selfDriveDepositMultiplier >= 0 && data.selfDriveDepositMultiplier <= 20))
+      && (!('selfDriveDepositMinKes' in data) || (data.selfDriveDepositMinKes is number && data.selfDriveDepositMinKes >= 0 && data.selfDriveDepositMinKes <= 500000))
+      && (!('selfDriveDepositFixedKes' in data) || (data.selfDriveDepositFixedKes is number && data.selfDriveDepositFixedKes >= 0 && data.selfDriveDepositFixedKes <= 500000))
+      && isOptionalString(data, 'dispatchHours', 100)
+      && isOptionalString(data, 'kraPin', 30)
+      && isOptionalString(data, 'bankDetails', 200)
+      && isOptionalString(data, 'bookingTermsSummary', 400)
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidStaffMember(data, uid) {
+      return data.keys().hasAll([
+        'uid', 'email', 'fullName', 'role', 'status', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'uid', 'email', 'fullName', 'role', 'status', 'createdAt', 'updatedAt'
+      ])
+      && data.uid == uid
+      && isNonEmptyString(data.email, 120)
+      && isNonEmptyString(data.fullName, 100)
+      && data.role in ['admin', 'dispatcher']
+      && data.status in ['active', 'disabled']
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidStaffInvite(data, emailKey) {
+      return data.keys().hasAll(['email', 'fullName', 'role', 'invitedBy', 'createdAt'])
+      && data.keys().hasOnly(['email', 'fullName', 'role', 'invitedBy', 'createdAt'])
+      && isNonEmptyString(data.email, 120) && data.email.lower() == emailKey
+      && isNonEmptyString(data.fullName, 100)
+      && data.role in ['admin', 'dispatcher']
+      && isNonEmptyString(data.invitedBy, 120)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidVehicle(data) {
+      return data.keys().hasAll([
+        'id', 'name', 'category', 'categoryLabel', 'registrationPlate',
+        'dailyRateKes', 'selfDriveRateKes',
+        'selfDriveAvailable', 'chauffeurAvailable', 'passengers', 'luggage',
+        'transmission', 'fuelType', 'terrain', 'highlight', 'image',
+        'currentOdometerKm', 'nextServiceKm', 'nextServiceDate',
+        'insuranceExpiryDate', 'ntsaExpiryDate', 'status', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'id', 'name', 'category', 'categoryLabel', 'registrationPlate',
+        'dailyRateKes', 'selfDriveRateKes', 'airportTransferKes', 'selfDriveDepositKes',
+        'selfDriveAvailable', 'chauffeurAvailable', 'passengers', 'luggage',
+        'transmission', 'fuelType', 'terrain', 'highlight', 'image',
+        'currentOdometerKm', 'nextServiceKm', 'nextServiceDate',
+        'insuranceExpiryDate', 'ntsaExpiryDate', 'status', 'updatedAt'
+      ])
+      && isNonEmptyString(data.id, 80)
+      && isNonEmptyString(data.name, 100)
+      && data.category in ['executive', '4x4-safari', 'family-group', 'economy']
+      && isNonEmptyString(data.categoryLabel, 50)
+      && isNonEmptyString(data.registrationPlate, 20)
+      && data.dailyRateKes is number && data.dailyRateKes >= 0
+      && data.selfDriveRateKes is number && data.selfDriveRateKes >= 0
+      && isOptionalNumber(data, 'airportTransferKes', 0)
+      && isOptionalNumber(data, 'selfDriveDepositKes', 0)
+      && data.selfDriveAvailable is bool
+      && data.chauffeurAvailable is bool
+      && data.passengers is number && data.passengers >= 1 && data.passengers <= 30
+      && data.luggage is number && data.luggage >= 0 && data.luggage <= 30
+      && isNonEmptyString(data.transmission, 40)
+      && isNonEmptyString(data.fuelType, 20)
+      && isNonEmptyString(data.terrain, 160)
+      && isNonEmptyString(data.highlight, 500)
+      && isNonEmptyString(data.image, 350000)
+      && data.currentOdometerKm is number && data.currentOdometerKm >= 0
+      && data.nextServiceKm is number && data.nextServiceKm >= 0
+      && isNonEmptyString(data.nextServiceDate, 20)
+      && isNonEmptyString(data.insuranceExpiryDate, 20)
+      && isNonEmptyString(data.ntsaExpiryDate, 20)
+      && data.status in ['Available', 'Booked', 'In Maintenance', 'Inactive']
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidMaintenanceLog(data) {
+      return data.keys().hasAll([
+        'vehicleId', 'vehicleName', 'registrationPlate', 'serviceDate',
+        'odometerKm', 'costKes', 'partsReplaced', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'vehicleId', 'vehicleName', 'registrationPlate', 'serviceDate',
+        'odometerKm', 'costKes', 'partsReplaced', 'notes', 'nextDueKm', 'nextDueDate', 'createdAt'
+      ])
+      && isNonEmptyString(data.vehicleId, 80)
+      && isNonEmptyString(data.vehicleName, 100)
+      && isNonEmptyString(data.registrationPlate, 20)
+      && isNonEmptyString(data.serviceDate, 20)
+      && data.odometerKm is number && data.odometerKm >= 0
+      && data.costKes is number && data.costKes >= 0
+      && isNonEmptyString(data.partsReplaced, 300)
+      && isOptionalString(data, 'notes', 500)
+      && isOptionalNumber(data, 'nextDueKm', 0)
+      && isOptionalString(data, 'nextDueDate', 20)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidDriver(data) {
+      return data.keys().hasAll([
+        'fullName', 'phone', 'nationalId', 'licenseNumber', 'licenseExpiryDate',
+        'specialties', 'status', 'tripCount', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'fullName', 'phone', 'nationalId', 'licenseNumber', 'licenseExpiryDate',
+        'assignedVehicleId', 'assignedVehicleName', 'specialties', 'status',
+        'tripCount', 'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.fullName, 100)
+      && isNonEmptyString(data.phone, 30)
+      && isNonEmptyString(data.nationalId, 30)
+      && isNonEmptyString(data.licenseNumber, 40)
+      && isNonEmptyString(data.licenseExpiryDate, 20)
+      && isOptionalString(data, 'assignedVehicleId', 80)
+      && isOptionalString(data, 'assignedVehicleName', 100)
+      && isNonEmptyString(data.specialties, 250)
+      && data.status in ['Available', 'On Trip', 'Off Duty']
+      && data.tripCount is number && data.tripCount >= 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll([
+        'bookingRef', 'serviceType', 'vehicleId', 'vehicleName',
+        'pickupLocation', 'destination', 'pickupDate', 'pickupTime',
+        'returnDate', 'returnTime', 'rentalDays', 'clientName', 'clientPhone',
+        'quotedAmountKes', 'amountPaidKes', 'paymentStatus', 'status', 'source',
+        'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'bookingRef', 'serviceType', 'vehicleId', 'vehicleName', 'registrationPlate',
+        'driverId', 'driverName', 'driverPhone',
+        'pickupLocation', 'destination', 'pickupDate', 'pickupTime',
+        'returnDate', 'returnTime', 'rentalDays', 'flightNumber', 'notes',
+        'clientName', 'clientPhone', 'clientEmail',
+        'quotedAmountKes', 'amountPaidKes', 'paymentStatus', 'status', 'source',
+        'odometerOut', 'fuelOut', 'conditionOut',
+        'handoverPassedItems', 'handoverFlaggedItems', 'handoverCompletedBy', 'handoverCompletedAt',
+        'odometerIn', 'fuelIn', 'damageNotes',
+        'returnPassedItems', 'returnFlaggedItems', 'returnCompletedBy', 'returnCompletedAt',
+        'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.bookingRef, 30)
+      && data.serviceType in ['chauffeur', 'self-drive', 'airport-transfer']
+      && isNonEmptyString(data.vehicleId, 80)
+      && isNonEmptyString(data.vehicleName, 100)
+      && isOptionalString(data, 'registrationPlate', 20)
+      && isOptionalString(data, 'driverId', 80)
+      && isOptionalString(data, 'driverName', 100)
+      && isOptionalString(data, 'driverPhone', 30)
+      && isNonEmptyString(data.pickupLocation, 200)
+      && isNonEmptyString(data.destination, 200)
+      && isNonEmptyString(data.pickupDate, 20)
+      && isNonEmptyString(data.pickupTime, 20)
+      && isNonEmptyString(data.returnDate, 20)
+      && isNonEmptyString(data.returnTime, 20)
+      && data.rentalDays is number && data.rentalDays >= 1 && data.rentalDays <= 365
+      && isOptionalString(data, 'flightNumber', 40)
+      && isOptionalString(data, 'notes', 500)
+      && isNonEmptyString(data.clientName, 120)
+      && isNonEmptyString(data.clientPhone, 30)
+      && isOptionalString(data, 'clientEmail', 120)
+      && data.quotedAmountKes is number && data.quotedAmountKes >= 0
+      && data.amountPaidKes is number && data.amountPaidKes >= 0
+      && data.paymentStatus in ['Unpaid', 'Deposit Paid', 'Paid in Full']
+      && data.status in ['Pending', 'Confirmed', 'Active', 'Completed', 'Cancelled']
+      && data.source in ['Online', 'WhatsApp', 'Walk-In', 'Phone']
+      && isOptionalNumber(data, 'odometerOut', 0)
+      && isOptionalString(data, 'fuelOut', 40)
+      && isOptionalString(data, 'conditionOut', 300)
+      && isOptionalInspectionList(data, 'handoverPassedItems')
+      && isOptionalInspectionList(data, 'handoverFlaggedItems')
+      && isOptionalString(data, 'handoverCompletedBy', 120)
+      && isOptionalString(data, 'handoverCompletedAt', 40)
+      && isOptionalNumber(data, 'odometerIn', 0)
+      && isOptionalString(data, 'fuelIn', 40)
+      && isOptionalString(data, 'damageNotes', 300)
+      && isOptionalInspectionList(data, 'returnPassedItems')
+      && isOptionalInspectionList(data, 'returnFlaggedItems')
+      && isOptionalString(data, 'returnCompletedBy', 120)
+      && isOptionalString(data, 'returnCompletedAt', 40)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicBookingCreate(data) {
+      return isValidBooking(data)
+        && data.status == 'Pending'
+        && data.source == 'Online'
+        && data.paymentStatus == 'Unpaid'
+        && data.amountPaidKes == 0
+        && !('driverId' in data)
+        && !('handoverPassedItems' in data)
+        && !('handoverFlaggedItems' in data)
+        && !('handoverCompletedBy' in data)
+        && !('returnPassedItems' in data)
+        && !('returnFlaggedItems' in data)
+        && !('returnCompletedBy' in data)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+        'bookingId', 'bookingRef', 'clientName', 'method', 'amountKes',
+        'paidAt', 'recordedByEmail', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'bookingId', 'bookingRef', 'clientName', 'clientType', 'method',
+        'mpesaCode', 'amountKes', 'notes', 'paidAt', 'recordedByEmail', 'createdAt'
+      ])
+      && isNonEmptyString(data.bookingId, 80)
+      && isNonEmptyString(data.bookingRef, 30)
+      && isNonEmptyString(data.clientName, 120)
+      && isOptionalString(data, 'clientType', 40)
+      && data.method in ['M-Pesa Paybill/STK', 'Bank Transfer', 'Cash', 'Corporate/NGO Monthly Invoice']
+      && isOptionalString(data, 'mpesaCode', 40)
+      && data.amountKes is number && data.amountKes > 0
+      && isOptionalString(data, 'notes', 300)
+      && isNonEmptyString(data.paidAt, 30)
+      && isNonEmptyString(data.recordedByEmail, 120)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidClientAccount(data) {
+      return data.keys().hasAll([
+        'name', 'phone', 'accountType', 'totalTrips', 'totalSpendKes', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'name', 'phone', 'email', 'accountType', 'idOrPassport', 'kraPin',
+        'organization', 'totalTrips', 'totalSpendKes', 'notes', 'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.name, 120)
+      && isNonEmptyString(data.phone, 30)
+      && isOptionalString(data, 'email', 120)
+      && data.accountType in ['Individual / Diaspora', 'Tourist', 'Corporate / NGO']
+      && isOptionalString(data, 'idOrPassport', 40)
+      && isOptionalString(data, 'kraPin', 30)
+      && isOptionalString(data, 'organization', 120)
+      && data.totalTrips is number && data.totalTrips >= 0
+      && data.totalSpendKes is number && data.totalSpendKes >= 0
+      && isOptionalString(data, 'notes', 500)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidJournalPost(data) {
+      return data.keys().hasAll([
+        'slug', 'title', 'category', 'publishedAt', 'readTime', 'image', 'excerpt', 'body', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'slug', 'title', 'category', 'publishedAt', 'readTime', 'image', 'excerpt', 'body', 'recommendedRouteSlug', 'updatedAt'
+      ])
+      && isNonEmptyString(data.slug, 120)
+      && isNonEmptyString(data.title, 200)
+      && isNonEmptyString(data.category, 60)
+      && isNonEmptyString(data.publishedAt, 40)
+      && isNonEmptyString(data.readTime, 30)
+      && isNonEmptyString(data.image, 300)
+      && isNonEmptyString(data.excerpt, 500)
+      && isNonEmptyString(data.body, 8000)
+      && isOptionalString(data, 'recommendedRouteSlug', 100)
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidDestinationItem(data) {
+      return data.keys().hasAll([
+        'slug', 'name', 'county', 'distanceFromKisumu', 'driveTime',
+        'recommendedVehicle', 'recommendedVehicleId', 'image', 'summary',
+        'roadConditions', 'featuredOnHome', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'slug', 'name', 'county', 'distanceFromKisumu', 'driveTime',
+        'recommendedVehicle', 'recommendedVehicleId', 'image', 'summary',
+        'roadConditions', 'localTipsText', 'featuredOnHome', 'updatedAt'
+      ])
+      && isNonEmptyString(data.slug, 100)
+      && isNonEmptyString(data.name, 120)
+      && isNonEmptyString(data.county, 80)
+      && isNonEmptyString(data.distanceFromKisumu, 100)
+      && isNonEmptyString(data.driveTime, 80)
+      && isNonEmptyString(data.recommendedVehicle, 120)
+      && isNonEmptyString(data.recommendedVehicleId, 80)
+      && isNonEmptyString(data.image, 300)
+      && isNonEmptyString(data.summary, 500)
+      && isNonEmptyString(data.roadConditions, 800)
+      && isOptionalString(data, 'localTipsText', 1000)
+      && data.featuredOnHome is bool
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidTestimonialItem(data) {
+      return data.keys().hasAll([
+        'quote', 'clientName', 'role', 'context', 'route', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'quote', 'clientName', 'role', 'context', 'route', 'updatedAt'
+      ])
+      && isNonEmptyString(data.quote, 600)
+      && isNonEmptyString(data.clientName, 100)
+      && isNonEmptyString(data.role, 100)
+      && isNonEmptyString(data.context, 140)
+      && isNonEmptyString(data.route, 100)
+      && data.updatedAt is timestamp;
+    }
+
+    // 4. Collection Match Rules
+
+    // Connection test doc
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Site settings (public read, admin-only write)
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'site';
+      allow create: if isValidId(settingId) && settingId == 'site' && isAdmin() && isValidSiteSettings(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId) && settingId == 'site' && isAdmin() && isValidSiteSettings(incoming()) && incoming().updatedAt == request.time;
+    }
+
+    // Staff directory (strictly admin or owner)
+    match /staff/{staffId} {
+      allow get: if isValidId(staffId) && (isOwner(staffId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(staffId) && isVerifiedUser() && isValidStaffMember(incoming(), staffId)
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (isOwner(staffId) && isBootstrapAdmin() && incoming().role == 'admin' && incoming().status == 'active')
+          || (
+            isOwner(staffId)
+            && exists(/databases/$(database)/documents/staff_invites/$(request.auth.token.email.lower()))
+            && incoming().email.lower() == request.auth.token.email.lower()
+            && incoming().role == get(/databases/$(database)/documents/staff_invites/$(request.auth.token.email.lower())).data.role
+            && incoming().status == 'active'
+          )
+        );
+      allow update: if isValidId(staffId) && isAdmin() && isValidStaffMember(incoming(), staffId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'role', 'status', 'updatedAt']);
+      allow delete: if isValidId(staffId) && isAdmin() && existing().email != 'antonyonyi75@gmail.com';
+    }
+
+    // Staff invites (keyed by lowercase email)
+    match /staff_invites/{emailKey} {
+      allow get: if isValidEmailId(emailKey) && (isAdmin() || (isVerifiedUser() && request.auth.token.email.lower() == emailKey));
+      allow list: if isAdmin();
+      allow create: if isValidEmailId(emailKey) && isAdmin() && isValidStaffInvite(incoming(), emailKey) && incoming().createdAt == request.time;
+      allow update: if isValidEmailId(emailKey) && isAdmin() && isValidStaffInvite(incoming(), emailKey) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidEmailId(emailKey) && isAdmin();
+    }
+
+    // Fleet vehicles (public read for storefront, staff write, admin delete)
+    match /vehicles/{vehicleId} {
+      allow get: if isValidId(vehicleId);
+      allow list: if true;
+      allow create: if isValidId(vehicleId) && isStaff() && isValidVehicle(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(vehicleId) && isStaff() && isValidVehicle(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(vehicleId) && isAdmin();
+    }
+
+    // Maintenance logs (staff only)
+    match /maintenance_logs/{logId} {
+      allow get: if isValidId(logId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(logId) && isStaff() && isValidMaintenanceLog(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(logId) && isStaff() && isValidMaintenanceLog(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    // Drivers directory (staff only - PII isolated)
+    match /drivers/{driverId} {
+      allow get: if isValidId(driverId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(driverId) && isStaff() && isValidDriver(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(driverId) && isStaff() && isValidDriver(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isValidId(driverId) && isAdmin();
+    }
+
+    // Bookings (public create Pending, staff-only read/update, terminal state lock, admin delete)
+    match /bookings/{bookingId} {
+      allow get: if isValidId(bookingId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(bookingId) && (
+        isValidPublicBookingCreate(incoming())
+        || (isStaff() && isValidBooking(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time)
+      );
+      allow update: if isValidId(bookingId) && isStaff() && isValidBooking(incoming())
+        && incoming().bookingRef == existing().bookingRef
+        && incoming().source == existing().source
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (!(existing().status in ['Completed', 'Cancelled']) || isAdmin());
+      allow delete: if isValidId(bookingId) && isAdmin();
+    }
+
+    // Transactions (staff only)
+    match /transactions/{txId} {
+      allow get: if isValidId(txId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(txId) && isStaff() && isValidTransaction(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(txId) && isAdmin() && isValidTransaction(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(txId) && isAdmin();
+    }
+
+    // Clients CRM (staff only - PII isolated)
+    match /clients/{clientId} {
+      allow get: if isValidId(clientId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(clientId) && isStaff() && isValidClientAccount(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(clientId) && isStaff() && isValidClientAccount(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isValidId(clientId) && isAdmin();
+    }
+
+    // CMS: Journal posts
+    match /journal/{articleId} {
+      allow get: if isValidId(articleId);
+      allow list: if true;
+      allow create: if isValidId(articleId) && isStaff() && isValidJournalPost(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(articleId) && isStaff() && isValidJournalPost(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(articleId) && isStaff();
+    }
+
+    // CMS: Destinations
+    match /destinations/{destId} {
+      allow get: if isValidId(destId);
+      allow list: if true;
+      allow create: if isValidId(destId) && isStaff() && isValidDestinationItem(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(destId) && isStaff() && isValidDestinationItem(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(destId) && isStaff();
+    }
+
+    // CMS: Testimonials
+    match /testimonials/{testimonialId} {
+      allow get: if isValidId(testimonialId);
+      allow list: if true;
+      allow create: if isValidId(testimonialId) && isStaff() && isValidTestimonialItem(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(testimonialId) && isStaff() && isValidTestimonialItem(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(testimonialId) && isStaff();
+    }
+  }
+}
