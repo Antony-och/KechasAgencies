@@ -1,7 +1,14 @@
+export type DestinationCategory =
+  | 'Safari & Nature'
+  | 'Lakeside & Islands'
+  | 'Highlands & Tea'
+  | 'Border & Fieldwork';
+
 export interface DestinationGuide {
   slug: string;
   name: string;
   county: string;
+  category?: DestinationCategory;
   distanceFromKisumu: string;
   driveTime: string;
   recommendedVehicle: string;
@@ -18,8 +25,9 @@ export const DESTINATIONS: DestinationGuide[] = [
     slug: 'ruma-national-park',
     name: 'Ruma National Park',
     county: 'Homa Bay County',
+    category: 'Safari & Nature',
     distanceFromKisumu: '140 km via Katito & Kendu Bay',
-    driveTime: '≈ 2.5 hrs from Kisumu',
+    driveTime: '≈ 2.5 hrs',
     recommendedVehicle: 'Toyota Land Cruiser Prado',
     recommendedVehicleId: 'toyota-land-cruiser-prado',
     image: '/src/assets/images/dest_ruma_savannah_1795598679417.jpg',
@@ -38,8 +46,9 @@ export const DESTINATIONS: DestinationGuide[] = [
     slug: 'kakamega-forest',
     name: 'Kakamega Forest Reserve',
     county: 'Kakamega County',
-    distanceFromKisumu: '58 km via Kisumu–Kakamega Highway',
-    driveTime: '≈ 1.5 – 2 hrs from Kisumu',
+    category: 'Safari & Nature',
+    distanceFromKisumu: '58 km via Kisumu–Kakamega Hwy',
+    driveTime: '≈ 1.5 hrs',
     recommendedVehicle: 'Mazda CX-5 or Land Cruiser Prado',
     recommendedVehicleId: 'mazda-cx-5',
     image: '/src/assets/images/dest_kakamega_canopy_1795598680259.jpg',
@@ -58,8 +67,9 @@ export const DESTINATIONS: DestinationGuide[] = [
     slug: 'lake-victoria-circuit',
     name: 'Lake Victoria & Kisumu Circuit',
     county: 'Kisumu County',
+    category: 'Lakeside & Islands',
     distanceFromKisumu: '10 – 40 km loop',
-    driveTime: '15 – 45 min from CBD',
+    driveTime: '15 – 45 min',
     recommendedVehicle: 'Toyota Noah or Mercedes-Benz E-Class',
     recommendedVehicleId: 'toyota-noah-voxy',
     image: '/src/assets/images/dest_lake_victoria_1795598707039.jpg',
@@ -75,11 +85,96 @@ export const DESTINATIONS: DestinationGuide[] = [
     featuredOnHome: true,
   },
   {
+    slug: 'rusinga-mfangano-islands',
+    name: 'Rusinga & Mfangano Islands',
+    county: 'Homa Bay County',
+    category: 'Lakeside & Islands',
+    distanceFromKisumu: '155 km via Kendu Bay & Mbita',
+    driveTime: '≈ 3 hrs',
+    recommendedVehicle: 'Toyota Land Cruiser Prado',
+    recommendedVehicleId: 'toyota-land-cruiser-prado',
+    image: '/src/assets/images/dest_rusinga_mbita_islands_1795682137338.jpg',
+    summary:
+      'Drive straight across the scenic Mbita Causeway onto Rusinga’s golden-hour volcanic shores, fossil heritage ridges, and boat launches for Mfangano Island.',
+    roadConditions:
+      'Newly surfaced tarmac from Kisumu through Homa Bay and across Mbita Causeway onto Rusinga ring road; resort approach tracks and island lookout trails reward SUV ground clearance.',
+    localTips: [
+      'Time your Mbita Causeway crossing for late afternoon when Lake Victoria turns copper-gold.',
+      'Coordinate secure lakeside parking in Mbita or Rusinga Lodge when hopping a boat to Mfangano rock-art caves.',
+      'Pre-order fresh tilapia lunch stops near Takawiri or Rusinga fishing bays.',
+    ],
+    featuredOnHome: true,
+  },
+  {
+    slug: 'mt-elgon-highlands',
+    name: 'Mt. Elgon & Kitale Highlands',
+    county: 'Bungoma & Trans Nzoia',
+    category: 'Highlands & Tea',
+    distanceFromKisumu: '160 – 205 km via Webuye & Kimilili',
+    driveTime: '≈ 3.5 hrs',
+    recommendedVehicle: 'Toyota Land Cruiser Prado',
+    recommendedVehicleId: 'toyota-land-cruiser-prado',
+    image: '/src/assets/images/dest_mt_elgon_highlands_1795682137529.jpg',
+    summary:
+      'Volcanic elephant salt caves at Kitum, bamboo highland switchbacks, and crisp alpine views linking Bungoma’s Cheptais foothills to Mt. Elgon National Park.',
+    roadConditions:
+      'Paved A1 highway through Kakamega and Webuye toward Kimilili or Kitale; national park access tracks and Endebess forest ascents require genuine 4x4 low-range capability in wet months.',
+    localTips: [
+      'Pack warm layers—night and dawn temperatures at Chorlim Gate drop briskly below 10°C.',
+      'Carry bright headlamps if touring Kitum and Makingeny underground caves with KWS rangers.',
+      'Combine with Saiwa Swamp National Park outside Kitale for a 2-day Western highlands loop.',
+    ],
+    featuredOnHome: true,
+  },
+  {
+    slug: 'kericho-nandi-tea-hills',
+    name: 'Kericho Tea Estates & Nandi Hills',
+    county: 'Kericho & Nandi Counties',
+    category: 'Highlands & Tea',
+    distanceFromKisumu: '85 – 110 km via Awasi & Muhoroni',
+    driveTime: '≈ 1.5 – 2 hrs',
+    recommendedVehicle: 'Mazda CX-5',
+    recommendedVehicleId: 'mazda-cx-5',
+    image: '/src/assets/images/dest_kericho_tea_hills_1795682139290.jpg',
+    summary:
+      'Sweeping emerald tea plantations, misty highland hairpins, and Chagaik Arboretum trails rising steadily above the Kano Plains from Kisumu.',
+    roadConditions:
+      'Smooth paved C35 / B1 escarpment climb out of Awasi and Chemilil with sweeping highland bends and frequent valley fog in early mornings.',
+    localTips: [
+      'Leave Kisumu by 7:30 AM for clear views across the Nandi Escarpment before afternoon clouds build.',
+      'Stop at historic tea estate tasting rooms or Chagaik Dam boardwalks along the Kericho–Nakuru road.',
+      'Ideal executive day retreat or cool-climate weekend transfer straight from KIS Airport.',
+    ],
+    featuredOnHome: true,
+  },
+  {
+    slug: 'ndere-island-got-ramogi',
+    name: 'Ndere Island & Got Ramogi Sanctuary',
+    county: 'Kisumu & Siaya Counties',
+    category: 'Lakeside & Islands',
+    distanceFromKisumu: '48 – 95 km via Kombewa & Bondo',
+    driveTime: '≈ 1 – 1.75 hrs',
+    recommendedVehicle: 'Toyota Noah or Mazda CX-5',
+    recommendedVehicleId: 'mazda-cx-5',
+    image: '/src/assets/images/dest_ndere_got_ramogi_1795682138587.jpg',
+    summary:
+      'Unspoiled Lake Victoria birding island paired with the sacred indigenous forest ridge of Got Ramogi and the vast Yala Swamp papyrus ecosystem.',
+    roadConditions:
+      'Fast tarmac west from Kisumu through Kombewa and Bondo toward Usenge; final lakeshore landing spurs to Kaloka Beach and Got Ramogi trailhead are compacted gravel.',
+    localTips: [
+      'Boat charters to Ndere Island National Park launch cleanly from Kaloka Beach—our drivers coordinate boat wait times.',
+      'Got Ramogi’s hilltop forest trail offers sweeping 360-degree views across Yala Swamp and Uganda’s islands.',
+      'Bring binoculars for fish eagles, papyrus gonoleks, and sitatunga sightings along the wetlands.',
+    ],
+    featuredOnHome: false,
+  },
+  {
     slug: 'busia-border-corridor',
     name: 'Busia & Malaba Border Corridor',
     county: 'Busia & Bungoma Counties',
+    category: 'Border & Fieldwork',
     distanceFromKisumu: '115 – 145 km via Luanda & Bumala',
-    driveTime: '≈ 2 – 2.5 hrs from Kisumu',
+    driveTime: '≈ 2 – 2.5 hrs',
     recommendedVehicle: 'Toyota Corolla Fielder or Mazda CX-5',
     recommendedVehicleId: 'toyota-corolla-fielder',
     image: '/src/assets/images/fleet_toyota_sedan_1795598679217.jpg',
@@ -97,8 +192,9 @@ export const DESTINATIONS: DestinationGuide[] = [
     slug: 'migori-isabania-corridor',
     name: 'Migori & Isebania Field Corridor',
     county: 'Migori County',
+    category: 'Border & Fieldwork',
     distanceFromKisumu: '165 – 190 km via Sondu & Rongo',
-    driveTime: '≈ 3 hrs from Kisumu',
+    driveTime: '≈ 3 hrs',
     recommendedVehicle: 'Toyota Land Cruiser Prado',
     recommendedVehicleId: 'toyota-land-cruiser-prado',
     image: '/src/assets/images/fleet_toyota_prado_1795598678345.jpg',
@@ -116,8 +212,9 @@ export const DESTINATIONS: DestinationGuide[] = [
     slug: 'kisii-nyamira-highlands',
     name: 'Kisii & Nyamira Highlands',
     county: 'Kisii & Nyamira Counties',
+    category: 'Highlands & Tea',
     distanceFromKisumu: '110 – 130 km via Katito & Oyugis',
-    driveTime: '≈ 2 – 2.5 hrs from Kisumu',
+    driveTime: '≈ 2 – 2.5 hrs',
     recommendedVehicle: 'Mazda CX-5',
     recommendedVehicleId: 'mazda-cx-5',
     image: '/src/assets/images/fleet_mazda_cx5_1795598677965.jpg',

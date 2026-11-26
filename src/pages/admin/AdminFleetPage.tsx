@@ -15,6 +15,7 @@ import AdminLayout from '../../components/AdminLayout';
 import ResilientImage from '../../components/ResilientImage';
 import FleetVehicleModal, { createDefaultVehicleDraft } from '../../components/admin/FleetVehicleModal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { useSiteData } from '../../contexts/SiteDataContext';
 import { db } from '../../lib/firebase';
 import { MaintenanceLogDoc, VehicleDoc, VehicleStatus } from '../../lib/adminTypes';
@@ -23,7 +24,8 @@ import { handleFirestoreError, OperationType } from '../../lib/firestoreError';
 import { seedDefaultFleetVehicles } from '../../lib/seedPortal';
 
 export default function AdminFleetPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const { settings } = useSiteData();
   const [vehicles, setVehicles] = useState<VehicleDoc[]>([]);
   const [loadingFleet, setLoadingFleet] = useState(true);
@@ -45,6 +47,18 @@ export default function AdminFleetPage() {
   const [maintNextDate, setMaintNextDate] = useState('');
 
   useEffect(() => {
+    if (isDemoMode) {
+      setVehicles(demo.vehicles);
+      setLoadingFleet(false);
+      setMaintVehicleId((prev) => prev || demo.vehicles[0]?.id || '');
+      setLogs(
+        [...demo.maintenanceLogs].sort((a, b) =>
+          (b.serviceDate || '').localeCompare(a.serviceDate || '')
+        )
+      );
+      return;
+    }
+
     const unsubV = onSnapshot(
       collection(db, 'vehicles'),
       (snap) => {
@@ -71,9 +85,13 @@ export default function AdminFleetPage() {
       unsubV();
       unsubM();
     };
-  }, []);
+  }, [isDemoMode, demo.vehicles, demo.maintenanceLogs]);
 
   async function handleLoadDefaultFleet() {
+    if (isDemoMode) {
+      demo.resetDemoData();
+      return;
+    }
     setSeedingFleet(true);
     try {
       await seedDefaultFleetVehicles();
@@ -97,6 +115,12 @@ export default function AdminFleetPage() {
   };
 
   async function handleStatusChange(v: VehicleDoc, nextStatus: VehicleStatus) {
+    if (isDemoMode) {
+      demo.setVehicles((prev) =>
+        prev.map((item) => (item.id === v.id ? { ...item, status: nextStatus } : item))
+      );
+      return;
+    }
     try {
       await updateDoc(doc(db, 'vehicles', v.id), {
         status: nextStatus,
@@ -108,9 +132,16 @@ export default function AdminFleetPage() {
   }
 
   async function handleArchiveVehicle(v: VehicleDoc) {
+    const nextStatus: VehicleStatus = v.status === 'Inactive' ? 'Available' : 'Inactive';
+    if (isDemoMode) {
+      demo.setVehicles((prev) =>
+        prev.map((item) => (item.id === v.id ? { ...item, status: nextStatus } : item))
+      );
+      return;
+    }
     try {
       await updateDoc(doc(db, 'vehicles', v.id), {
-        status: v.status === 'Inactive' ? 'Available' : 'Inactive',
+        status: nextStatus,
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -120,6 +151,11 @@ export default function AdminFleetPage() {
 
   async function handleDeleteVehicle(id: string) {
     if (!isAdmin) return;
+    if (isDemoMode) {
+      demo.setVehicles((prev) => prev.filter((item) => item.id !== id));
+      setConfirmDeleteId(null);
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'vehicles', id));
       setConfirmDeleteId(null);
@@ -135,6 +171,39 @@ export default function AdminFleetPage() {
     const logId = `maint_${Date.now()}`;
     const odo = Number(maintOdometer) || v.currentOdometerKm;
     const nextKm = Number(maintNextKm) || odo + 5000;
+
+    if (isDemoMode) {
+      const newLog: MaintenanceLogDoc = {
+        id: logId,
+        vehicleId: v.id,
+        vehicleName: v.name,
+        registrationPlate: v.registrationPlate,
+        serviceDate: maintDate,
+        odometerKm: odo,
+        costKes: Number(maintCost) || 0,
+        partsReplaced: maintParts.trim() || 'Routine service inspection',
+        nextDueKm: nextKm,
+        nextDueDate: maintNextDate || v.nextServiceDate,
+      };
+      demo.setMaintenanceLogs((prev) => [newLog, ...prev]);
+      demo.setVehicles((prev) =>
+        prev.map((item) =>
+          item.id === v.id
+            ? {
+                ...item,
+                currentOdometerKm: odo,
+                nextServiceKm: nextKm,
+                nextServiceDate: maintNextDate || v.nextServiceDate,
+                status: 'Available',
+              }
+            : item
+        )
+      );
+      setShowMaintModal(false);
+      setMaintParts('');
+      setMaintCost('');
+      return;
+    }
 
     try {
       await setDoc(doc(db, 'maintenance_logs', logId), {
@@ -167,12 +236,17 @@ export default function AdminFleetPage() {
   }
 
   return (
-    <AdminLayout title="Fleet & Maintenance Management" breadcrumb="Fleet & Maintenance">
+    <AdminLayout
+      title={isAdmin ? 'Fleet & Maintenance Management' : 'Fleet Readiness & Service Schedule'}
+      breadcrumb="Fleet & Maintenance"
+    >
       <div className="space-y-8">
         {/* Actions Header */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <p className="text-sm text-[#4B5563]">
-            Manage vehicle rates, odometer intervals, insurance/NTSA expiry, and service history.
+            {isAdmin
+              ? 'Manage vehicle rates, odometer intervals, insurance/NTSA expiry, and service history.'
+              : 'Monitor vehicle availability, odometer intervals, insurance/NTSA compliance, and service history.'}
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -183,14 +257,16 @@ export default function AdminFleetPage() {
               <Wrench className="w-4 h-4" />
               <span>Log Service</span>
             </button>
-            <button
-              type="button"
-              onClick={openAddVehicle}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672]"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Vehicle</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={openAddVehicle}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Vehicle</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -237,7 +313,9 @@ export default function AdminFleetPage() {
                 <thead>
                   <tr className="border-b border-[#111827]/10 bg-[#F9FAFB] text-xs font-semibold text-[#4B5563]">
                     <th className="py-3 px-4">Vehicle & Plate</th>
-                    <th className="py-3 px-4">Chauffeur / Self-Drive</th>
+                    <th className="py-3 px-4">
+                      {isAdmin ? 'Chauffeur / Self-Drive' : 'Specs & Capacity'}
+                    </th>
                     <th className="py-3 px-4">Odometer & Next Service</th>
                     <th className="py-3 px-4">Insurance & NTSA</th>
                     <th className="py-3 px-4">Status</th>
@@ -263,16 +341,32 @@ export default function AdminFleetPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-xs">
-                        <div className="text-[#111827] font-medium">
-                          Chauffeur: {formatKes(v.dailyRateKes)}
-                        </div>
-                        <div className="text-[#4B5563]">
-                          {v.selfDriveAvailable
-                            ? `Self-Drive: ${formatKes(v.selfDriveRateKes)}`
-                            : 'Chauffeur Only'}
-                        </div>
-                      </td>
+                      {isAdmin ? (
+                        <td className="py-3 px-4 font-mono tabular-nums text-xs">
+                          <div className="text-[#111827] font-medium">
+                            Chauffeur: {formatKes(v.dailyRateKes)}
+                          </div>
+                          <div className="text-[#4B5563]">
+                            {v.selfDriveAvailable
+                              ? `Self-Drive: ${formatKes(v.selfDriveRateKes)}`
+                              : 'Chauffeur Only'}
+                          </div>
+                        </td>
+                      ) : (
+                        <td className="py-3 px-4 text-xs">
+                          <div className="text-[#111827] font-medium tabular-nums">
+                            {v.passengers} Pax · {v.transmission}
+                          </div>
+                          <div className="text-[#4B5563]">
+                            {v.fuelType} ·{' '}
+                            {v.chauffeurAvailable && v.selfDriveAvailable
+                              ? 'Chauffeur / Self-Drive'
+                              : v.chauffeurAvailable
+                                ? 'Chauffeur Only'
+                                : 'Self-Drive'}
+                          </div>
+                        </td>
+                      )}
                       <td className="py-3 px-4 font-mono tabular-nums text-xs">
                         <div>{v.currentOdometerKm.toLocaleString()} km</div>
                         <div className={serviceAlert ? 'text-[#C8231D] font-semibold' : 'text-[#4B5563]'}>
@@ -310,15 +404,17 @@ export default function AdminFleetPage() {
                           onClick={() => openEditVehicle(v)}
                           className="px-2.5 py-1.5 rounded border border-[#194793]/25 text-xs font-semibold text-[#194793] hover:bg-[#EFF3F9]"
                         >
-                          Edit
+                          {isAdmin ? 'Edit' : 'Compliance'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleArchiveVehicle(v)}
-                          className="px-2.5 py-1.5 rounded border border-[#111827]/20 text-xs text-[#4B5563] hover:bg-[#F9FAFB]"
-                        >
-                          {v.status === 'Inactive' ? 'Show' : 'Hide'}
-                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveVehicle(v)}
+                            className="px-2.5 py-1.5 rounded border border-[#111827]/20 text-xs text-[#4B5563] hover:bg-[#F9FAFB]"
+                          >
+                            {v.status === 'Inactive' ? 'Show' : 'Hide'}
+                          </button>
+                        )}
                         {isAdmin &&
                           (confirmDeleteId === v.id ? (
                             <span className="inline-flex items-center gap-1">
@@ -380,7 +476,15 @@ export default function AdminFleetPage() {
                     <p className="text-xs text-[#4B5563]">{log.partsReplaced}</p>
                   </div>
                   <div className="font-mono text-right tabular-nums">
-                    <div className="font-semibold text-[#194793]">{formatKes(log.costKes)}</div>
+                    {isAdmin ? (
+                      <div className="font-semibold text-[#194793]">{formatKes(log.costKes)}</div>
+                    ) : (
+                      <div className="font-semibold text-[#194793]">
+                        {log.nextDueKm !== undefined
+                          ? `Next: ${log.nextDueKm.toLocaleString()} km`
+                          : 'Service logged'}
+                      </div>
+                    )}
                     <div className="text-[11px] text-[#4B5563]">
                       @ {log.odometerKm.toLocaleString()} km
                     </div>
@@ -457,17 +561,19 @@ export default function AdminFleetPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[#4B5563]">Garage Cost (KES)</label>
-                  <input
-                    type="number"
-                    required
-                    value={maintCost}
-                    onChange={(e) => setMaintCost(e.target.value)}
-                    className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB] font-mono"
-                  />
-                </div>
+              <div className={`grid ${isAdmin ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+                {isAdmin && (
+                  <div className="space-y-1">
+                    <label className="text-[#4B5563]">Garage Cost (KES)</label>
+                    <input
+                      type="number"
+                      required
+                      value={maintCost}
+                      onChange={(e) => setMaintCost(e.target.value)}
+                      className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB] font-mono"
+                    />
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-[#4B5563]">Next Service Due (km)</label>
                   <input

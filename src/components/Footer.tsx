@@ -2,9 +2,11 @@ import { Link } from 'react-router-dom';
 import { Mail, MapPin, Phone, Clock } from 'lucide-react';
 import { SITE_CONFIG } from '../data/site';
 import { useSiteData } from '../contexts/SiteDataContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Footer() {
   const { settings, vehicles, buildWhatsAppHref } = useSiteData();
+  const { isAuthorizedStaff, isAdmin } = useAuth();
   const phoneDigits = settings.whatsappNumber.replace(/\D/g, '');
   const telHref = phoneDigits ? `tel:+${phoneDigits}` : SITE_CONFIG.phoneHref;
   const whatsappUrl = buildWhatsAppHref();
@@ -74,13 +76,15 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link to="/blog" className="hover:text-white transition-colors">
-                  Field Journal
-                </Link>
-              </li>
-              <li>
-                <Link to="/admin/login" className="hover:text-white transition-colors">
-                  Staff Sign In
+                <Link
+                  to={isAuthorizedStaff ? '/admin' : '/admin/login'}
+                  className="hover:text-white transition-colors"
+                >
+                  {isAuthorizedStaff
+                    ? isAdmin
+                      ? 'Admin Portal'
+                      : 'Dispatch Portal'
+                    : 'Staff Sign In'}
                 </Link>
               </li>
             </ul>

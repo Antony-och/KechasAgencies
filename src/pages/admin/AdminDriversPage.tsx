@@ -10,18 +10,26 @@ import {
 import { Plus, X } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { db } from '../../lib/firebase';
 import { DriverDoc, DriverStatus, VehicleDoc } from '../../lib/adminTypes';
 import { handleFirestoreError, OperationType } from '../../lib/firestoreError';
 
 export default function AdminDriversPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const [drivers, setDrivers] = useState<DriverDoc[]>([]);
   const [vehicles, setVehicles] = useState<VehicleDoc[]>([]);
   const [editing, setEditing] = useState<Partial<DriverDoc> | null>(null);
   const [isNew, setIsNew] = useState(false);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setDrivers(demo.drivers);
+      setVehicles(demo.vehicles);
+      return;
+    }
+
     const unsubD = onSnapshot(
       collection(db, 'drivers'),
       (snap) => {
@@ -42,7 +50,7 @@ export default function AdminDriversPage() {
       unsubD();
       unsubV();
     };
-  }, []);
+  }, [isDemoMode, demo.drivers, demo.vehicles]);
 
   const openNew = () => {
     setIsNew(true);
@@ -65,6 +73,32 @@ export default function AdminDriversPage() {
     e.preventDefault();
     if (!editing || !editing.id || !editing.fullName) return;
     const assignedVeh = vehicles.find((v) => v.id === editing.assignedVehicleId);
+
+    if (isDemoMode) {
+      const nextDriver: DriverDoc = {
+        id: editing.id,
+        fullName: editing.fullName.trim(),
+        phone: (editing.phone || '').trim(),
+        nationalId: (editing.nationalId || '').trim(),
+        licenseNumber: (editing.licenseNumber || '').trim(),
+        licenseExpiryDate: editing.licenseExpiryDate || '2027-06-30',
+        assignedVehicleId: assignedVeh ? assignedVeh.id : '',
+        assignedVehicleName: assignedVeh
+          ? `${assignedVeh.name} (${assignedVeh.registrationPlate})`
+          : '',
+        specialties: (editing.specialties || 'Western Kenya').trim(),
+        status: (editing.status || 'Available') as DriverStatus,
+        tripCount: Number(editing.tripCount) || 0,
+      };
+      demo.setDrivers((prev) => {
+        const exists = prev.some((d) => d.id === nextDriver.id);
+        return exists
+          ? prev.map((d) => (d.id === nextDriver.id ? nextDriver : d))
+          : [nextDriver, ...prev];
+      });
+      setEditing(null);
+      return;
+    }
 
     const payload: Record<string, unknown> = {
       fullName: editing.fullName.trim(),
@@ -91,6 +125,10 @@ export default function AdminDriversPage() {
 
   async function handleDelete(id: string) {
     if (!isAdmin) return;
+    if (isDemoMode) {
+      demo.setDrivers((prev) => prev.filter((d) => d.id !== id));
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'drivers', id));
     } catch (err) {
@@ -106,14 +144,16 @@ export default function AdminDriversPage() {
             Track vetted Kisumu chauffeurs, driving license expiry, route specialties, and live
             trip availability.
           </p>
-          <button
-            type="button"
-            onClick={openNew}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672]"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Chauffeur</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={openNew}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672]"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Chauffeur</span>
+            </button>
+          )}
         </div>
 
         <div className="rounded-lg border border-[#111827]/10 bg-white overflow-hidden">
@@ -122,7 +162,9 @@ export default function AdminDriversPage() {
               <thead>
                 <tr className="border-b border-[#111827]/10 bg-[#F9FAFB] text-xs font-semibold text-[#4B5563]">
                   <th className="py-3 px-4">Driver & Phone</th>
-                  <th className="py-3 px-4">National ID & DL Expiry</th>
+                  <th className="py-3 px-4">
+                    {isAdmin ? 'National ID & DL Expiry' : 'Verification & DL Expiry'}
+                  </th>
                   <th className="py-3 px-4">Assigned Vehicle</th>
                   <th className="py-3 px-4">Route Specialties</th>
                   <th className="py-3 px-4 text-right">Trips</th>
@@ -138,7 +180,13 @@ export default function AdminDriversPage() {
                       <div className="font-mono text-[11px] text-[#4B5563]">{d.phone}</div>
                     </td>
                     <td className="py-3 px-4 font-mono text-xs text-[#4B5563]">
-                      <div>ID: {d.nationalId}</div>
+                      <div>
+                        {isAdmin
+                          ? `ID: ${d.nationalId}`
+                          : d.nationalId && d.nationalId.length >= 4
+                            ? `ID: ••••${d.nationalId.slice(-4)}`
+                            : 'ID Verified'}
+                      </div>
                       <div>
                         {d.licenseNumber} · Exp: {d.licenseExpiryDate}
                       </div>
@@ -234,16 +282,18 @@ export default function AdminDriversPage() {
                   className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB] font-mono"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-[#4B5563]">National ID *</label>
-                <input
-                  type="text"
-                  required
-                  value={editing.nationalId || ''}
-                  onChange={(e) => setEditing({ ...editing, nationalId: e.target.value })}
-                  className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB] font-mono"
-                />
-              </div>
+              {isAdmin && (
+                <div className="space-y-1">
+                  <label className="text-[#4B5563]">National ID *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editing.nationalId || ''}
+                    onChange={(e) => setEditing({ ...editing, nationalId: e.target.value })}
+                    className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB] font-mono"
+                  />
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[#4B5563]">Driving License # *</label>
                 <input

@@ -41,6 +41,7 @@ import {
 import { formatKes } from '../../data/fleet';
 import { SITE_CONFIG } from '../../data/site';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { useSiteData } from '../../contexts/SiteDataContext';
 import { handleFirestoreError, OperationType } from '../../lib/firestoreError';
 import { getChauffeurDailyFeeKes } from '../../lib/pricing';
@@ -71,7 +72,8 @@ function getInitials(name: string): string {
 }
 
 export default function AdminSettingsPage() {
-  const { isAdmin, staffProfile } = useAuth();
+  const { isAdmin, staffProfile, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const { settings } = useSiteData();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('pricing');
@@ -152,6 +154,11 @@ export default function AdminSettingsPage() {
   }, [settings]);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setFleetVehicles([...demo.vehicles].sort((a, b) => a.name.localeCompare(b.name)));
+      return;
+    }
+
     const unsubVehicles = onSnapshot(
       collection(db, 'vehicles'),
       (snap) => {
@@ -189,7 +196,7 @@ export default function AdminSettingsPage() {
       unsubStaff();
       unsubInvites();
     };
-  }, [isAdmin]);
+  }, [isAdmin, isDemoMode, demo.vehicles]);
 
   const fleetRatePreview = useMemo(() => {
     const prevDriverFee = getChauffeurDailyFeeKes(settings);
@@ -245,7 +252,7 @@ export default function AdminSettingsPage() {
 
   async function handleSaveSettings(e: FormEvent) {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isAdmin || isDemoMode) return;
     setSettingsSaved(false);
     setSettingsError('');
     setSyncNotice('');
@@ -330,7 +337,7 @@ export default function AdminSettingsPage() {
 
   async function handleInviteStaff(e: FormEvent) {
     e.preventDefault();
-    if (!isAdmin) return;
+    if (!isAdmin || isDemoMode) return;
     const cleanEmail = inviteEmail.trim().toLowerCase();
     if (!cleanEmail || !inviteName.trim()) return;
     setInviteMsg('');
@@ -361,7 +368,7 @@ export default function AdminSettingsPage() {
     member: StaffMemberDoc,
     updates: { role?: StaffRole; status?: StaffStatus }
   ) {
-    if (!isAdmin) return;
+    if (!isAdmin || isDemoMode) return;
     try {
       await updateDoc(doc(db, 'staff', member.uid), {
         fullName: member.fullName,
@@ -375,7 +382,7 @@ export default function AdminSettingsPage() {
   }
 
   async function handleRemoveStaffMember(member: StaffMemberDoc) {
-    if (!isAdmin || member.email === BOOTSTRAP_ADMIN_EMAIL) return;
+    if (!isAdmin || isDemoMode || member.email === BOOTSTRAP_ADMIN_EMAIL) return;
     try {
       await deleteDoc(doc(db, 'staff', member.uid));
       setConfirmRemoveUid(null);
@@ -385,7 +392,7 @@ export default function AdminSettingsPage() {
   }
 
   async function handleRevokeInvite(inviteId: string) {
-    if (!isAdmin) return;
+    if (!isAdmin || isDemoMode) return;
     try {
       await deleteDoc(doc(db, 'staff_invites', inviteId));
       setConfirmRevokeId(null);

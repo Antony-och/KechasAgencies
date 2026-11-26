@@ -20,6 +20,8 @@ import {
   X,
 } from 'lucide-react';
 import ResilientImage from '../ResilientImage';
+import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { useSiteData } from '../../contexts/SiteDataContext';
 import { db } from '../../lib/firebase';
 import { SiteSettingsDoc, VehicleDoc, VehicleStatus } from '../../lib/adminTypes';
@@ -281,6 +283,8 @@ export default function FleetVehicleModal({
   onClose,
   onSaved,
 }: FleetVehicleModalProps) {
+  const { isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const { settings } = useSiteData();
   const driverFeeKes = getChauffeurDailyFeeKes(settings);
 
@@ -532,6 +536,42 @@ export default function FleetVehicleModal({
 
     setSaving(true);
     try {
+      if (isDemoMode) {
+        const nextVehicle: VehicleDoc = {
+          id: docId,
+          name: cleanName,
+          category: cat,
+          categoryLabel: FLEET_CATEGORY_LABELS[cat],
+          registrationPlate: cleanPlate,
+          dailyRateKes: cleanChauffeurRate,
+          selfDriveRateKes: cleanSelfRate,
+          selfDriveAvailable: Boolean(form.selfDriveAvailable),
+          chauffeurAvailable: Boolean(form.chauffeurAvailable),
+          passengers: payload.passengers,
+          luggage: payload.luggage,
+          transmission: payload.transmission,
+          fuelType: payload.fuelType,
+          terrain: payload.terrain,
+          highlight: payload.highlight,
+          image: payload.image,
+          currentOdometerKm: odo,
+          nextServiceKm: nextSvcKm,
+          nextServiceDate: payload.nextServiceDate,
+          insuranceExpiryDate: payload.insuranceExpiryDate,
+          ntsaExpiryDate: payload.ntsaExpiryDate,
+          status,
+        };
+        demo.setVehicles((prev) => {
+          const exists = prev.some((v) => v.id === docId);
+          return exists
+            ? prev.map((v) => (v.id === docId ? nextVehicle : v))
+            : [nextVehicle, ...prev];
+        });
+        onSaved?.(docId);
+        onClose();
+        return;
+      }
+
       await setDoc(doc(db, 'vehicles', docId), payload);
       onSaved?.(docId);
       onClose();
@@ -701,15 +741,17 @@ export default function FleetVehicleModal({
                   </div>
 
                   <div className="space-y-1">
-                    <span className="block text-[#4B5563]">Status &amp; Website Visibility</span>
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <span className="block text-[#4B5563]">
+                      {isAdmin ? 'Status & Website Visibility' : 'Operational Status'}
+                    </span>
+                    <div className={`grid ${isAdmin ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
                       {(
                         [
                           { id: 'Available', label: 'Available' },
                           { id: 'Booked', label: 'Booked' },
                           { id: 'In Maintenance', label: 'Maintenance' },
-                          { id: 'Inactive', label: 'Hidden (Off)' },
-                        ] as const
+                          ...(isAdmin ? [{ id: 'Inactive', label: 'Hidden (Off)' }] : []),
+                        ] as { id: VehicleStatus; label: string }[]
                       ).map((st) => {
                         const active = status === st.id;
                         return (
@@ -736,8 +778,9 @@ export default function FleetVehicleModal({
                 </div>
               </div>
 
-              {/* Section 2: Improved Rates & Hire Modes (KES) */}
-              <div className="space-y-3.5 pt-4 border-t border-[#111827]/10">
+              {/* Section 2: Improved Rates & Hire Modes (KES) - Admin Only */}
+              {isAdmin && (
+                <div className="space-y-3.5 pt-4 border-t border-[#111827]/10">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-[#111827]">
                     2. Rates &amp; Hire Modes (KES)
@@ -855,6 +898,7 @@ export default function FleetVehicleModal({
                   </div>
                 )}
               </div>
+              )}
 
               {/* Section 3: Storefront Photo, Specs & Copy Carousel */}
               <div className="space-y-3 pt-4 border-t border-[#111827]/10">
@@ -1408,28 +1452,30 @@ export default function FleetVehicleModal({
                         {form.registrationPlate?.trim().toUpperCase() || 'PLATE'} · {status}
                       </p>
                     </div>
-                    <div className="text-right shrink-0">
-                      {form.chauffeurAvailable ? (
-                        <>
-                          <div className="font-mono text-base font-semibold text-[#194793] tabular-nums">
-                            {formatKes(previewRate)}
-                          </div>
-                          <div className="text-[11px] text-[#4B5563]">chauffeur / day</div>
-                          {form.selfDriveAvailable && previewSelfRate > 0 && (
-                            <div className="text-[11px] font-mono text-[#111827] tabular-nums">
-                              SD: {formatKes(previewSelfRate)}/d
+                    {isAdmin && (
+                      <div className="text-right shrink-0">
+                        {form.chauffeurAvailable ? (
+                          <>
+                            <div className="font-mono text-base font-semibold text-[#194793] tabular-nums">
+                              {formatKes(previewRate)}
                             </div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div className="font-mono text-base font-semibold text-[#194793] tabular-nums">
-                            {formatKes(previewSelfRate)}
-                          </div>
-                          <div className="text-[11px] text-[#4B5563]">self-drive / day</div>
-                        </>
-                      )}
-                    </div>
+                            <div className="text-[11px] text-[#4B5563]">chauffeur / day</div>
+                            {form.selfDriveAvailable && previewSelfRate > 0 && (
+                              <div className="text-[11px] font-mono text-[#111827] tabular-nums">
+                                SD: {formatKes(previewSelfRate)}/d
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-mono text-base font-semibold text-[#194793] tabular-nums">
+                              {formatKes(previewSelfRate)}
+                            </div>
+                            <div className="text-[11px] text-[#4B5563]">self-drive / day</div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <p className="text-xs leading-relaxed text-[#4B5563] line-clamp-3">

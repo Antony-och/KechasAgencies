@@ -22,6 +22,7 @@ import { formatKes } from '../../data/fleet';
 import { SITE_CONFIG } from '../../data/site';
 import { handleFirestoreError, OperationType } from '../../lib/firestoreError';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { useSiteData } from '../../contexts/SiteDataContext';
 
 const METHODS: PaymentMethod[] = [
@@ -32,7 +33,8 @@ const METHODS: PaymentMethod[] = [
 ];
 
 export default function AdminFinancePage() {
-  const { staffProfile, isAdmin } = useAuth();
+  const { staffProfile, isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const { settings } = useSiteData();
   const [transactions, setTransactions] = useState<TransactionDoc[]>([]);
   const [bookings, setBookings] = useState<BookingDoc[]>([]);
@@ -55,6 +57,16 @@ export default function AdminFinancePage() {
   const [invoiceBooking, setInvoiceBooking] = useState<BookingDoc | null>(null);
 
   useEffect(() => {
+    if (isDemoMode) {
+      setTransactions(
+        [...demo.transactions].sort((a, b) => (b.paidAt || '').localeCompare(a.paidAt || ''))
+      );
+      setBookings(
+        [...demo.bookings].sort((a, b) => (b.pickupDate || '').localeCompare(a.pickupDate || ''))
+      );
+      return;
+    }
+
     const unsubT = onSnapshot(
       query(collection(db, 'transactions'), orderBy('paidAt', 'desc')),
       (snap) => {
@@ -75,7 +87,7 @@ export default function AdminFinancePage() {
       unsubT();
       unsubB();
     };
-  }, []);
+  }, [isDemoMode, demo.transactions, demo.bookings]);
 
   useEffect(() => {
     if (!payBookingId && bookings.length > 0) {
@@ -153,6 +165,43 @@ export default function AdminFinancePage() {
 
     setSavingPay(true);
     const txId = `tx_${Date.now()}`;
+    const newPaidTotal = (bk.amountPaidKes || 0) + amt;
+    const newPayStatus: PaymentStatus =
+      newPaidTotal >= bk.quotedAmountKes
+        ? 'Paid in Full'
+        : newPaidTotal > 0
+          ? 'Deposit Paid'
+          : 'Unpaid';
+
+    if (isDemoMode) {
+      const demoTx: TransactionDoc = {
+        id: txId,
+        bookingId: bk.id,
+        bookingRef: bk.bookingRef,
+        clientName: bk.clientName,
+        clientType: payClientType,
+        method: payMethod,
+        mpesaCode: payMpesaCode.trim(),
+        amountKes: amt,
+        notes: payNotes.trim(),
+        paidAt: payDate,
+        recordedByEmail: staffProfile?.email || 'dispatcher-demo@kechasagencies.co.ke',
+      };
+      demo.setTransactions((prev) => [demoTx, ...prev]);
+      demo.setBookings((prev) =>
+        prev.map((item) =>
+          item.id === bk.id
+            ? { ...item, amountPaidKes: newPaidTotal, paymentStatus: newPayStatus }
+            : item
+        )
+      );
+      setShowPayModal(false);
+      setPayMpesaCode('');
+      setPayNotes('');
+      setSavingPay(false);
+      return;
+    }
+
     try {
       const txPayload: Record<string, unknown> = {
         bookingId: bk.id,
@@ -168,14 +217,6 @@ export default function AdminFinancePage() {
         createdAt: serverTimestamp(),
       };
       await setDoc(doc(db, 'transactions', txId), txPayload);
-
-      const newPaidTotal = (bk.amountPaidKes || 0) + amt;
-      const newPayStatus: PaymentStatus =
-        newPaidTotal >= bk.quotedAmountKes
-          ? 'Paid in Full'
-          : newPaidTotal > 0
-            ? 'Deposit Paid'
-            : 'Unpaid';
 
       await updateDoc(doc(db, 'bookings', bk.id), {
         amountPaidKes: newPaidTotal,

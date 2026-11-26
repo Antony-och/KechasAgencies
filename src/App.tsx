@@ -9,8 +9,8 @@ import ServicesPage from './pages/ServicesPage';
 import DestinationsPage from './pages/DestinationsPage';
 import BookPage from './pages/BookPage';
 import AboutPage from './pages/AboutPage';
-import BlogPage from './pages/BlogPage';
 import ContactPage from './pages/ContactPage';
+import { RequireAdminRoute } from './components/AdminLayout';
 import AdminLoginPage from './pages/admin/AdminLoginPage';
 import AdminOverviewPage from './pages/admin/AdminOverviewPage';
 import AdminBookingsPage from './pages/admin/AdminBookingsPage';
@@ -39,16 +39,44 @@ export default function App() {
     <BrowserRouter>
       <ScrollToTop />
       <Routes>
-        {/* Admin Portal Routes (protected inside AdminLayout) */}
+        {/* Portal Routes (protected inside AdminLayout / RequireAdminRoute) */}
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/admin" element={<AdminOverviewPage />} />
         <Route path="/admin/bookings" element={<AdminBookingsPage />} />
         <Route path="/admin/fleet" element={<AdminFleetPage />} />
         <Route path="/admin/drivers" element={<AdminDriversPage />} />
-        <Route path="/admin/finance" element={<AdminFinancePage />} />
-        <Route path="/admin/clients" element={<AdminClientsPage />} />
-        <Route path="/admin/content" element={<AdminContentPage />} />
-        <Route path="/admin/settings" element={<AdminSettingsPage />} />
+        <Route
+          path="/admin/finance"
+          element={
+            <RequireAdminRoute>
+              <AdminFinancePage />
+            </RequireAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/clients"
+          element={
+            <RequireAdminRoute>
+              <AdminClientsPage />
+            </RequireAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/content"
+          element={
+            <RequireAdminRoute>
+              <AdminContentPage />
+            </RequireAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/settings"
+          element={
+            <RequireAdminRoute>
+              <AdminSettingsPage />
+            </RequireAdminRoute>
+          }
+        />
 
         {/* Public Website Routes */}
         <Route element={<PublicShell />}>
@@ -58,7 +86,6 @@ export default function App() {
           <Route path="/destinations" element={<DestinationsPage />} />
           <Route path="/book" element={<BookPage />} />
           <Route path="/about" element={<AboutPage />} />
-          <Route path="/blog" element={<BlogPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route path="*" element={<HomePage />} />
         </Route>

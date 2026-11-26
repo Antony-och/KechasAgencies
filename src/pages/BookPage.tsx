@@ -14,8 +14,11 @@ import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import ResilientImage from '../components/ResilientImage';
 import { FLEET_VEHICLES, formatKes } from '../data/fleet';
 import { useSiteData } from '../contexts/SiteDataContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useDemoPortal } from '../contexts/DemoPortalContext';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreError';
+import { BookingDoc } from '../lib/adminTypes';
 
 type ServiceMode = 'chauffeur' | 'self-drive' | 'airport-transfer';
 
@@ -59,6 +62,8 @@ function getTodayIso(): string {
 export default function BookPage() {
   const [searchParams] = useSearchParams();
   const { vehicles, settings, destinations, buildWhatsAppHref } = useSiteData();
+  const { isDemoMode } = useAuth();
+  const demo = useDemoPortal();
 
   const routeOptions = useMemo(() => {
     const set = new Set(TOP_ROUTES);
@@ -249,25 +254,64 @@ export default function BookPage() {
 
     setSubmitting(true);
     try {
+      const cleanReturnDate = (serviceType === 'airport-transfer' ? pickupDate : returnDate).slice(
+        0,
+        20
+      );
+      const cleanRentalDays = Math.min(365, Math.max(1, rentalDays));
+      const cleanQuoted = Math.max(0, Number(estimatedTotalKes) || 0);
+
+      if (isDemoMode) {
+        const demoRecord: BookingDoc = {
+          id: bookingDocId,
+          bookingRef: newRef,
+          serviceType,
+          vehicleId: selectedVehicle.id.slice(0, 80),
+          vehicleName: selectedVehicle.name.slice(0, 100),
+          registrationPlate: (selectedVehicle.registrationPlate || '').slice(0, 20),
+          pickupLocation: resolvedPickup.slice(0, 200),
+          destination: destination.slice(0, 200),
+          pickupDate: pickupDate.slice(0, 20),
+          pickupTime: pickupTime.slice(0, 20),
+          returnDate: cleanReturnDate,
+          returnTime: returnTime.slice(0, 20),
+          rentalDays: cleanRentalDays,
+          flightNumber: '',
+          notes: notes.trim().slice(0, 500),
+          clientName: fullName.trim().slice(0, 120),
+          clientPhone: phone.trim().slice(0, 30),
+          clientEmail: email.trim().slice(0, 120),
+          quotedAmountKes: cleanQuoted,
+          amountPaidKes: 0,
+          paymentStatus: 'Unpaid',
+          status: 'Pending',
+          source: 'Online',
+        };
+        demo.setBookings((prev) => [demoRecord, ...prev]);
+        setBookingRef(newRef);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
       const payload: Record<string, unknown> = {
         bookingRef: newRef,
         serviceType,
-        vehicleId: selectedVehicle.id,
-        vehicleName: selectedVehicle.name,
-        registrationPlate: selectedVehicle.idealFor?.[0] || '',
-        pickupLocation: resolvedPickup,
-        destination,
-        pickupDate,
-        pickupTime,
-        returnDate: serviceType === 'airport-transfer' ? pickupDate : returnDate,
-        returnTime,
-        rentalDays,
+        vehicleId: selectedVehicle.id.slice(0, 80),
+        vehicleName: selectedVehicle.name.slice(0, 100),
+        registrationPlate: (selectedVehicle.registrationPlate || '').slice(0, 20),
+        pickupLocation: resolvedPickup.slice(0, 200),
+        destination: destination.slice(0, 200),
+        pickupDate: pickupDate.slice(0, 20),
+        pickupTime: pickupTime.slice(0, 20),
+        returnDate: cleanReturnDate,
+        returnTime: returnTime.slice(0, 20),
+        rentalDays: cleanRentalDays,
         flightNumber: '',
-        notes: notes.trim(),
-        clientName: fullName.trim(),
-        clientPhone: phone.trim(),
-        clientEmail: email.trim(),
-        quotedAmountKes: estimatedTotalKes,
+        notes: notes.trim().slice(0, 500),
+        clientName: fullName.trim().slice(0, 120),
+        clientPhone: phone.trim().slice(0, 30),
+        clientEmail: email.trim().slice(0, 120),
+        quotedAmountKes: cleanQuoted,
         amountPaidKes: 0,
         paymentStatus: 'Unpaid',
         status: 'Pending',
@@ -827,6 +871,15 @@ export default function BookPage() {
                   </p>
                 </div>
               </div>
+
+              {(selectedVehicle.status === 'Booked' ||
+                selectedVehicle.status === 'In Maintenance') && (
+                <div className="p-3.5 rounded-md bg-white border border-[#D97706]/40 text-xs text-[#92400E] leading-relaxed">
+                  {selectedVehicle.status === 'Booked'
+                    ? 'Live Dispatch Note: This vehicle is currently out on an active trip. Submit your dates and Kisumu Dispatch will confirm turnaround timing or pair an equivalent unit in this class.'
+                    : 'Live Dispatch Note: This vehicle is undergoing scheduled workshop service. Submit your request and Dispatch will confirm release timing or assign a backup vehicle.'}
+                </div>
+              )}
 
               <div className="space-y-2.5 text-sm">
                 <div className="flex items-center justify-between gap-4">

@@ -5,10 +5,11 @@ import ResilientImage from '../components/ResilientImage';
 import { FleetCategoryId, formatKes } from '../data/fleet';
 import { useSiteData } from '../contexts/SiteDataContext';
 
-type FilterOption = 'all' | FleetCategoryId;
+type FilterOption = 'all' | 'ready' | FleetCategoryId;
 
 const FILTER_TABS: { id: FilterOption; label: string }[] = [
-  { id: 'all', label: 'All (8)' },
+  { id: 'all', label: 'All' },
+  { id: 'ready', label: 'Ready Now' },
   { id: 'executive', label: 'Executive' },
   { id: '4x4-safari', label: '4x4 Safari' },
   { id: 'family-group', label: 'Family & Group' },
@@ -22,25 +23,30 @@ export default function FleetPage() {
 
   useEffect(() => {
     const hash = location.hash.replace('#', '') as FilterOption;
-    if (['executive', '4x4-safari', 'family-group', 'economy'].includes(hash)) {
+    if (['ready', 'executive', '4x4-safari', 'family-group', 'economy'].includes(hash)) {
       setActiveCategory(hash);
     }
   }, [location.hash]);
 
+  const availableCount = vehicles.filter((v) => !v.status || v.status === 'Available').length;
+  const bookedCount = vehicles.filter((v) => v.status === 'Booked').length;
+  const maintenanceCount = vehicles.filter((v) => v.status === 'In Maintenance').length;
+
   const visibleVehicles =
     activeCategory === 'all'
       ? vehicles
-      : vehicles.filter((v) => v.category === activeCategory);
-
-  const availableCount = vehicles.filter((v) => !v.status || v.status === 'Available').length;
+      : activeCategory === 'ready'
+        ? vehicles.filter((v) => !v.status || v.status === 'Available')
+        : vehicles.filter((v) => v.category === activeCategory);
 
   return (
     <div className="py-12 lg:py-16">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         {/* Header */}
         <div className="space-y-4 max-w-2xl">
-          <p className="text-xs sm:text-sm font-semibold text-[#C8231D]">
-            Our fleet · {availableCount} of {vehicles.length} ready for immediate dispatch
+          <p className="text-xs sm:text-sm font-semibold text-[#C8231D] tabular-nums">
+            Live Dispatch Board · {availableCount} Ready · {bookedCount} On Active Trip ·{' '}
+            {maintenanceCount} In Workshop
           </p>
           <h1 className="font-serif text-4xl sm:text-5xl leading-tight text-[#111827]">
             {vehicles.length} vehicles maintained for Western Kenya.
@@ -63,7 +69,9 @@ export default function FleetPage() {
             const count =
               tab.id === 'all'
                 ? vehicles.length
-                : vehicles.filter((v) => v.category === tab.id).length;
+                : tab.id === 'ready'
+                  ? availableCount
+                  : vehicles.filter((v) => v.category === tab.id).length;
             return (
               <button
                 key={tab.id}
@@ -77,7 +85,7 @@ export default function FleetPage() {
                     : 'text-[#4B5563] hover:text-[#111827]'
                 }`}
               >
-                {tab.id === 'all' ? `All (${count})` : `${tab.label} (${count})`}
+                {`${tab.label} (${count})`}
               </button>
             );
           })}

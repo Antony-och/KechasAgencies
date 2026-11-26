@@ -306,6 +306,42 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
+    function isValidInquiry(data) {
+      return data.keys().hasAll([
+        'reference', 'topic', 'name', 'vehicleClass', 'replyVia',
+        'message', 'status', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'reference', 'topic', 'name', 'organization', 'phone', 'email',
+        'vehicleClass', 'travelDate', 'replyVia', 'message', 'status',
+        'bookingRef', 'handledBy', 'createdAt', 'updatedAt'
+      ])
+      && isNonEmptyString(data.reference, 20)
+      && data.topic in ['Vehicle Hire', 'KIS Airport Pickup', 'Corporate / NGO', 'Custom Route']
+      && isNonEmptyString(data.name, 120)
+      && isOptionalString(data, 'organization', 120)
+      && isOptionalString(data, 'phone', 30)
+      && isOptionalString(data, 'email', 120)
+      && ((('phone' in data) && data.phone.size() > 0) || (('email' in data) && data.email.size() > 0))
+      && isNonEmptyString(data.vehicleClass, 120)
+      && isOptionalString(data, 'travelDate', 20)
+      && data.replyVia in ['WhatsApp', 'Phone Call', 'Email']
+      && isNonEmptyString(data.message, 1000)
+      && data.status in ['New', 'Contacted', 'Converted', 'Archived']
+      && isOptionalString(data, 'bookingRef', 30)
+      && isOptionalString(data, 'handledBy', 120)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicInquiryCreate(data) {
+      return isValidInquiry(data)
+        && data.status == 'New'
+        && !('bookingRef' in data)
+        && !('handledBy' in data)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
     function isValidTransaction(data) {
       return data.keys().hasAll([
         'bookingId', 'bookingRef', 'clientName', 'method', 'amountKes',
@@ -494,6 +530,22 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (!(existing().status in ['Completed', 'Cancelled']) || isAdmin());
       allow delete: if isValidId(bookingId) && isAdmin();
+    }
+
+    // Quick Inquiries (public create New, staff-only read/update, archived lock for non-admin, admin delete)
+    match /inquiries/{inquiryId} {
+      allow get: if isValidId(inquiryId) && isStaff();
+      allow list: if isStaff();
+      allow create: if isValidId(inquiryId) && (
+        isValidPublicInquiryCreate(incoming())
+        || (isStaff() && isValidInquiry(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time)
+      );
+      allow update: if isValidId(inquiryId) && isStaff() && isValidInquiry(incoming())
+        && incoming().reference == existing().reference
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (existing().status != 'Archived' || isAdmin());
+      allow delete: if isValidId(inquiryId) && isAdmin();
     }
 
     // Transactions (staff only)

@@ -229,3 +229,26 @@ export interface TestimonialDoc {
   route: string;
   updatedAt?: unknown;
 }
+
+export type InquiryTopic = 'Vehicle Hire' | 'KIS Airport Pickup' | 'Corporate / NGO' | 'Custom Route';
+export type ReplyChannel = 'WhatsApp' | 'Phone Call' | 'Email';
+export type InquiryStatus = 'New' | 'Contacted' | 'Converted' | 'Archived';
+
+export interface InquiryDoc {
+  id: string;
+  reference: string;
+  topic: InquiryTopic;
+  name: string;
+  organization?: string;
+  phone?: string;
+  email?: string;
+  vehicleClass: string;
+  travelDate?: string;
+  replyVia: ReplyChannel;
+  message: string;
+  status: InquiryStatus;
+  bookingRef?: string;
+  handledBy?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}

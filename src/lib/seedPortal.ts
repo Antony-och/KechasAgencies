@@ -11,7 +11,6 @@ import {
 import { db } from './firebase';
 import { FLEET_VEHICLES } from '../data/fleet';
 import { DESTINATIONS } from '../data/destinations';
-import { JOURNAL_ARTICLES } from '../data/journal';
 import { TESTIMONIALS } from '../data/testimonials';
 import { SITE_CONFIG } from '../data/site';
 
@@ -515,29 +514,7 @@ export function ensurePortalSeeded(isAdminUser: boolean): Promise<void> {
       }
     });
 
-    // 8. CMS: Journal, Destinations, Testimonials
-    await runSeedSection('journal', async () => {
-      const journalSnap = await getDocs(query(collection(db, 'journal'), limit(1)));
-      if (journalSnap.empty) {
-        await Promise.all(
-          JOURNAL_ARTICLES.map((art) =>
-            setDoc(doc(db, 'journal', art.slug), {
-              slug: art.slug,
-              title: art.title,
-              category: art.category,
-              publishedAt: art.publishedAt,
-              readTime: art.readTime,
-              image: art.image,
-              excerpt: art.excerpt,
-              body: art.sections.map((s) => `${s.heading}\n${s.body}`).join('\n\n'),
-              recommendedRouteSlug: art.recommendedRouteSlug,
-              updatedAt: serverTimestamp(),
-            })
-          )
-        );
-      }
-    });
-
+    // 8. CMS: Destinations & Testimonials
     await runSeedSection('destinations', async () => {
       const destSnap = await getDocs(query(collection(db, 'destinations'), limit(1)));
       if (destSnap.empty) {

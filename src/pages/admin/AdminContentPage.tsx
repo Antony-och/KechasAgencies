@@ -15,11 +15,11 @@ import FleetVehicleModal, {
   createDefaultVehicleDraft,
 } from '../../components/admin/FleetVehicleModal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { useSiteData } from '../../contexts/SiteDataContext';
 import { db } from '../../lib/firebase';
 import {
   DestinationDoc,
-  JournalPostDoc,
   TestimonialDoc,
   VehicleDoc,
 } from '../../lib/adminTypes';
@@ -27,7 +27,7 @@ import { formatKes } from '../../data/fleet';
 import { handleFirestoreError, OperationType } from '../../lib/firestoreError';
 import { seedDefaultFleetVehicles } from '../../lib/seedPortal';
 
-type ContentTab = 'fleet' | 'journal' | 'destinations' | 'testimonials';
+type ContentTab = 'fleet' | 'destinations' | 'testimonials';
 
 function toSlug(raw: string): string {
   return raw
@@ -37,10 +37,10 @@ function toSlug(raw: string): string {
 }
 
 export default function AdminContentPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const { settings } = useSiteData();
   const [activeTab, setActiveTab] = useState<ContentTab>('fleet');
-  const [journal, setJournal] = useState<JournalPostDoc[]>([]);
   const [destinations, setDestinations] = useState<DestinationDoc[]>([]);
   const [testimonials, setTestimonials] = useState<TestimonialDoc[]>([]);
   const [vehicles, setVehicles] = useState<VehicleDoc[]>([]);
@@ -52,18 +52,6 @@ export default function AdminContentPage() {
   const [isNewVehicle, setIsNewVehicle] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Partial<VehicleDoc> | null>(null);
   const [confirmDeleteVehicleId, setConfirmDeleteVehicleId] = useState<string | null>(null);
-
-  // Journal Modal
-  const [showJournalModal, setShowJournalModal] = useState(false);
-  const [editingPost, setEditingPost] = useState<JournalPostDoc | null>(null);
-  const [jTitle, setJTitle] = useState('');
-  const [jCategory, setJCategory] = useState('Road Advisories');
-  const [jPublishedAt, setJPublishedAt] = useState('November 2026');
-  const [jReadTime, setJReadTime] = useState('4 min read');
-  const [jImage, setJImage] = useState('/src/assets/images/hero_prado_western_kenya_1795598677955.jpg');
-  const [jExcerpt, setJExcerpt] = useState('');
-  const [jBody, setJBody] = useState('');
-  const [jRouteSlug, setJRouteSlug] = useState('lake-victoria-circuit');
 
   // Destination Modal
   const [showDestModal, setShowDestModal] = useState(false);
@@ -89,11 +77,14 @@ export default function AdminContentPage() {
   const [tRoute, setTRoute] = useState('');
 
   useEffect(() => {
-    const unsubJ = onSnapshot(
-      collection(db, 'journal'),
-      (snap) => setJournal(snap.docs.map((d) => ({ ...(d.data() as JournalPostDoc), id: d.id }))),
-      (err) => handleFirestoreError(err, OperationType.LIST, 'journal')
-    );
+    if (isDemoMode) {
+      setDestinations(demo.destinations);
+      setTestimonials(demo.testimonials);
+      setVehicles(demo.vehicles);
+      setLoadingFleet(false);
+      return;
+    }
+
     const unsubD = onSnapshot(
       collection(db, 'destinations'),
       (snap) => setDestinations(snap.docs.map((d) => ({ ...(d.data() as DestinationDoc), id: d.id }))),
@@ -117,12 +108,11 @@ export default function AdminContentPage() {
     );
 
     return () => {
-      unsubJ();
       unsubD();
       unsubT();
       unsubV();
     };
-  }, []);
+  }, [isDemoMode, demo.destinations, demo.testimonials, demo.vehicles]);
 
   // Fleet handlers
   function openAddVehicle() {
@@ -138,9 +128,16 @@ export default function AdminContentPage() {
   }
 
   async function handleToggleVehicleVisibility(v: VehicleDoc) {
+    const nextStatus = v.status === 'Inactive' ? 'Available' : 'Inactive';
+    if (isDemoMode) {
+      demo.setVehicles((prev) =>
+        prev.map((item) => (item.id === v.id ? { ...item, status: nextStatus } : item))
+      );
+      return;
+    }
     try {
       await updateDoc(doc(db, 'vehicles', v.id), {
-        status: v.status === 'Inactive' ? 'Available' : 'Inactive',
+        status: nextStatus,
         updatedAt: serverTimestamp(),
       });
     } catch (err) {
@@ -150,6 +147,11 @@ export default function AdminContentPage() {
 
   async function handleDeleteVehicle(id: string) {
     if (!isAdmin) return;
+    if (isDemoMode) {
+      demo.setVehicles((prev) => prev.filter((item) => item.id !== id));
+      setConfirmDeleteVehicleId(null);
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'vehicles', id));
       setConfirmDeleteVehicleId(null);
@@ -159,6 +161,10 @@ export default function AdminContentPage() {
   }
 
   async function handleLoadDefaultFleet() {
+    if (isDemoMode) {
+      demo.resetDemoData();
+      return;
+    }
     setSeedingFleet(true);
     try {
       await seedDefaultFleetVehicles();
@@ -169,65 +175,19 @@ export default function AdminContentPage() {
     }
   }
 
-  async function handleDeleteContent(col: 'journal' | 'destinations' | 'testimonials', id: string) {
+  async function handleDeleteContent(col: 'destinations' | 'testimonials', id: string) {
+    if (isDemoMode) {
+      if (col === 'destinations') {
+        demo.setDestinations((prev) => prev.filter((item) => item.id !== id));
+      } else {
+        demo.setTestimonials((prev) => prev.filter((item) => item.id !== id));
+      }
+      return;
+    }
     try {
       await deleteDoc(doc(db, col, id));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `${col}/${id}`);
-    }
-  }
-
-  // Journal handlers
-  function openJournalModal(post?: JournalPostDoc) {
-    if (post) {
-      setEditingPost(post);
-      setJTitle(post.title);
-      setJCategory(post.category);
-      setJPublishedAt(post.publishedAt);
-      setJReadTime(post.readTime);
-      setJImage(post.image);
-      setJExcerpt(post.excerpt);
-      setJBody(post.body);
-      setJRouteSlug(post.recommendedRouteSlug || 'lake-victoria-circuit');
-    } else {
-      setEditingPost(null);
-      setJTitle('');
-      setJCategory('Road Advisories');
-      setJPublishedAt('November 2026');
-      setJReadTime('4 min read');
-      setJImage('/src/assets/images/hero_prado_western_kenya_1795598677955.jpg');
-      setJExcerpt('');
-      setJBody('');
-      setJRouteSlug('lake-victoria-circuit');
-    }
-    setShowJournalModal(true);
-  }
-
-  async function saveJournalPost(e: FormEvent) {
-    e.preventDefault();
-    const id = editingPost ? editingPost.id : `${toSlug(jTitle)}-${Date.now().toString().slice(-4)}`;
-    const slug = editingPost ? editingPost.slug : toSlug(jTitle);
-    const payload = {
-      slug,
-      title: jTitle.trim(),
-      category: jCategory.trim(),
-      publishedAt: jPublishedAt.trim(),
-      readTime: jReadTime.trim(),
-      image: jImage.trim(),
-      excerpt: jExcerpt.trim(),
-      body: jBody.trim(),
-      recommendedRouteSlug: jRouteSlug.trim(),
-      updatedAt: serverTimestamp(),
-    };
-    try {
-      if (editingPost) {
-        await updateDoc(doc(db, 'journal', id), payload);
-      } else {
-        await setDoc(doc(db, 'journal', id), payload);
-      }
-      setShowJournalModal(false);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `journal/${id}`);
     }
   }
 
@@ -263,9 +223,9 @@ export default function AdminContentPage() {
 
   async function saveDestination(e: FormEvent) {
     e.preventDefault();
-    const id = editingDest ? editingDest.id : toSlug(dName);
+    const id = editingDest ? editingDest.id : toSlug(dName) || `dest_${Date.now()}`;
     const matchedV = vehicles.find((v) => v.id === dVehicleId);
-    const payload = {
+    const baseFields: Omit<DestinationDoc, 'id'> = {
       slug: editingDest ? editingDest.slug : id,
       name: dName.trim(),
       county: dCounty.trim(),
@@ -278,6 +238,19 @@ export default function AdminContentPage() {
       roadConditions: dRoadConditions.trim(),
       localTipsText: dTips.trim(),
       featuredOnHome: dFeatured,
+    };
+
+    if (isDemoMode) {
+      const nextDest: DestinationDoc = { id, ...baseFields };
+      demo.setDestinations((prev) =>
+        editingDest ? prev.map((item) => (item.id === id ? nextDest : item)) : [nextDest, ...prev]
+      );
+      setShowDestModal(false);
+      return;
+    }
+
+    const payload = {
+      ...baseFields,
       updatedAt: serverTimestamp(),
     };
     try {
@@ -315,12 +288,25 @@ export default function AdminContentPage() {
   async function saveTestimonial(e: FormEvent) {
     e.preventDefault();
     const id = editingTest ? editingTest.id : `test_${Date.now()}`;
-    const payload = {
+    const baseFields: Omit<TestimonialDoc, 'id'> = {
       quote: tQuote.trim(),
       clientName: tName.trim(),
       role: tRole.trim(),
       context: tContext.trim(),
       route: tRoute.trim(),
+    };
+
+    if (isDemoMode) {
+      const nextTest: TestimonialDoc = { id, ...baseFields };
+      demo.setTestimonials((prev) =>
+        editingTest ? prev.map((item) => (item.id === id ? nextTest : item)) : [nextTest, ...prev]
+      );
+      setShowTestModal(false);
+      return;
+    }
+
+    const payload = {
+      ...baseFields,
       updatedAt: serverTimestamp(),
     };
     try {
@@ -346,7 +332,6 @@ export default function AdminContentPage() {
             {(
               [
                 { id: 'fleet', label: `Public Fleet (${vehicles.length})` },
-                { id: 'journal', label: `Journal Articles (${journal.length})` },
                 { id: 'destinations', label: `Destinations (${destinations.length})` },
                 { id: 'testimonials', label: `Testimonials (${testimonials.length})` },
               ] as const
@@ -370,7 +355,6 @@ export default function AdminContentPage() {
             type="button"
             onClick={() => {
               if (activeTab === 'fleet') openAddVehicle();
-              if (activeTab === 'journal') openJournalModal();
               if (activeTab === 'destinations') openDestModal();
               if (activeTab === 'testimonials') openTestModal();
             }}
@@ -380,11 +364,9 @@ export default function AdminContentPage() {
             <span>
               {activeTab === 'fleet'
                 ? 'Add Fleet Vehicle'
-                : activeTab === 'journal'
-                  ? 'New Journal Post'
-                  : activeTab === 'destinations'
-                    ? 'Add Destination'
-                    : 'Add Testimonial'}
+                : activeTab === 'destinations'
+                  ? 'Add Destination'
+                  : 'Add Testimonial'}
             </span>
           </button>
         </div>
@@ -584,47 +566,6 @@ export default function AdminContentPage() {
           </div>
         )}
 
-        {/* Journal List */}
-        {activeTab === 'journal' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {journal.map((post) => (
-              <article
-                key={post.id}
-                className="rounded-lg border border-[#111827]/10 bg-white overflow-hidden flex flex-col justify-between"
-              >
-                <div>
-                  <img src={post.image} alt={post.title} className="w-full h-40 object-cover bg-[#E5EBF4]" />
-                  <div className="p-4 space-y-2">
-                    <p className="text-[11px] font-semibold text-[#C8231D]">
-                      {post.category} · {post.publishedAt}
-                    </p>
-                    <h3 className="font-serif text-lg text-[#111827] leading-snug">{post.title}</h3>
-                    <p className="text-xs text-[#4B5563] line-clamp-3">{post.excerpt}</p>
-                  </div>
-                </div>
-                <div className="px-4 py-3 bg-[#F9FAFB] border-t border-[#111827]/10 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openJournalModal(post)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-[#194793]/25 text-xs font-semibold text-[#194793] hover:bg-[#EFF3F9]"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteContent('journal', post.id)}
-                    className="p-1.5 rounded border border-[#C8231D]/25 text-[#C8231D] hover:bg-[#FEF2F2]"
-                    aria-label="Delete article"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-
         {/* Destinations List */}
         {activeTab === 'destinations' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -717,59 +658,6 @@ export default function AdminContentPage() {
           </div>
         )}
       </div>
-
-      {/* Journal Modal */}
-      {showJournalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#111827]/45 p-4">
-          <form
-            onSubmit={saveJournalPost}
-            className="w-full max-w-xl rounded-lg bg-white border border-[#111827]/15 p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="font-serif text-xl text-[#111827]">
-                {editingPost ? 'Edit Journal Article' : 'Publish Journal Article'}
-              </h2>
-              <button type="button" onClick={() => setShowJournalModal(false)} className="p-1.5 rounded border border-[#111827]/15">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-1 text-xs">
-              <label className="text-[#4B5563]">Title *</label>
-              <input type="text" required value={jTitle} onChange={(e) => setJTitle(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[#4B5563]">Category</label>
-                <input type="text" required value={jCategory} onChange={(e) => setJCategory(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[#4B5563]">Published Date</label>
-                <input type="text" required value={jPublishedAt} onChange={(e) => setJPublishedAt(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[#4B5563]">Read Time</label>
-                <input type="text" required value={jReadTime} onChange={(e) => setJReadTime(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-              </div>
-            </div>
-            <div className="space-y-1 text-xs">
-              <label className="text-[#4B5563]">Cover Image URL</label>
-              <input type="text" required value={jImage} onChange={(e) => setJImage(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-            </div>
-            <div className="space-y-1 text-xs">
-              <label className="text-[#4B5563]">Excerpt *</label>
-              <textarea rows={2} required value={jExcerpt} onChange={(e) => setJExcerpt(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-            </div>
-            <div className="space-y-1 text-xs">
-              <label className="text-[#4B5563]">Article Body (separate sections with blank lines) *</label>
-              <textarea rows={6} required value={jBody} onChange={(e) => setJBody(e.target.value)} className="w-full px-3 py-2 rounded border border-[#111827]/20 bg-[#F9FAFB]" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setShowJournalModal(false)} className="px-4 py-2 rounded-md border border-[#111827]/20 text-xs">Cancel</button>
-              <button type="submit" className="px-4 py-2 rounded-md bg-[#194793] text-white text-xs font-semibold hover:bg-[#133672]">Save Article</button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Destination Modal */}
       {showDestModal && (

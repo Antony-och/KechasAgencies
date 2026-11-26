@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   collection,
+  deleteField,
   doc,
   onSnapshot,
   orderBy,
@@ -10,17 +11,20 @@ import {
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { CheckCircle2, ClipboardCheck, MessageCircle, Plus, Search, X } from 'lucide-react';
+import { CheckCircle2, ClipboardCheck, Inbox, MessageCircle, Plus, Search, X } from 'lucide-react';
 import AdminLayout from '../../components/AdminLayout';
 import BookingInspectionPanel, { InspectionTab } from '../../components/admin/BookingInspectionPanel';
 import HandoverSlipModal from '../../components/admin/HandoverSlipModal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDemoPortal } from '../../contexts/DemoPortalContext';
 import { db } from '../../lib/firebase';
 import {
   BookingDoc,
   BookingSource,
   BookingStatus,
   DriverDoc,
+  InquiryDoc,
+  InquiryStatus,
   VehicleDoc,
 } from '../../lib/adminTypes';
 import { formatKes } from '../../data/fleet';
@@ -48,16 +52,21 @@ function cleanWhatsAppPhone(raw: string): string {
 }
 
 export default function AdminBookingsPage() {
-  const { staffProfile } = useAuth();
+  const { staffProfile, isAdmin, isDemoMode } = useAuth();
+  const demo = useDemoPortal();
   const [searchParams, setSearchParams] = useSearchParams();
   const handledDeepLinkRef = useRef<string | null>(null);
 
   const [bookings, setBookings] = useState<BookingDoc[]>([]);
   const [vehicles, setVehicles] = useState<VehicleDoc[]>([]);
   const [drivers, setDrivers] = useState<DriverDoc[]>([]);
+  const [inquiries, setInquiries] = useState<InquiryDoc[]>([]);
+  const [portalView, setPortalView] = useState<'bookings' | 'inquiries'>('bookings');
+  const [inquiryFilter, setInquiryFilter] = useState<'Open' | 'All' | InquiryStatus>('Open');
   const [statusFilter, setStatusFilter] = useState<'All' | BookingStatus>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBooking, setSelectedBooking] = useState<BookingDoc | null>(null);
+  const [convertingInquiryId, setConvertingInquiryId] = useState<string | null>(null);
 
   // Assignment & fast checklist state inside detail drawer
   const [assignVehicleId, setAssignVehicleId] = useState('');
@@ -94,6 +103,19 @@ export default function AdminBookingsPage() {
   const [newError, setNewError] = useState('');
 
   useEffect(() => {
+    if (isDemoMode) {
+      const sorted = [...demo.bookings].sort((a, b) =>
+        (b.pickupDate || '').localeCompare(a.pickupDate || '')
+      );
+      setBookings(sorted);
+      setSelectedBooking((prev) => (prev ? sorted.find((r) => r.id === prev.id) || null : null));
+      setVehicles(demo.vehicles);
+      setNewVehicleId((prev) => prev || demo.vehicles[0]?.id || '');
+      setDrivers(demo.drivers);
+      setInquiries(demo.inquiries);
+      return;
+    }
+
     const unsubB = onSnapshot(
       query(collection(db, 'bookings'), orderBy('pickupDate', 'desc')),
       (snap) => {
@@ -122,12 +144,21 @@ export default function AdminBookingsPage() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'drivers')
     );
 
+    const unsubI = onSnapshot(
+      collection(db, 'inquiries'),
+      (snap) => {
+        setInquiries(snap.docs.map((d) => ({ ...(d.data() as InquiryDoc), id: d.id })));
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'inquiries')
+    );
+
     return () => {
       unsubB();
       unsubV();
       unsubD();
+      unsubI();
     };
-  }, []);
+  }, [isDemoMode, demo.bookings, demo.vehicles, demo.drivers, demo.inquiries]);
 
   const openDetail = (bk: BookingDoc, preferredTab?: InspectionTab) => {
     const matchedVehicle = vehicles.find((v) => v.id === bk.vehicleId);
@@ -162,9 +193,56 @@ export default function AdminBookingsPage() {
     setSaveNotice('');
   };
 
+  const startConvertInquiry = (inq: InquiryDoc) => {
+    const matchedVeh = vehicles.find(
+      (v) =>
+        v.name.toLowerCase() === inq.vehicleClass.toLowerCase() ||
+        inq.vehicleClass.toLowerCase().includes(v.name.toLowerCase())
+    );
+    const todayStr = new Date().toISOString().split('T')[0];
+    setConvertingInquiryId(inq.id);
+    setNewSource('Online');
+    setNewService(inq.topic === 'KIS Airport Pickup' ? 'airport-transfer' : 'chauffeur');
+    setNewVehicleId(matchedVeh?.id || vehicles[0]?.id || '');
+    setNewClientName(inq.name);
+    setNewClientPhone(inq.phone || '+254 ');
+    setNewClientEmail(inq.email || '');
+    setNewPickup(
+      inq.topic === 'KIS Airport Pickup' ? 'Kisumu International Airport (KIS)' : 'Kisumu CBD'
+    );
+    setNewPickupDate(inq.travelDate || todayStr);
+    setNewReturnDate(inq.travelDate || todayStr);
+    setNewNotes(`[${inq.reference} · ${inq.topic}] ${inq.message}`.slice(0, 500));
+    setNewError('');
+    setShowNewModal(true);
+  };
+
   useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'inquiries') {
+      setPortalView('inquiries');
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    const inquiryParam = searchParams.get('inquiryId');
+    if (inquiryParam && inquiries.length > 0 && vehicles.length > 0) {
+      const key = `inq:${inquiryParam}`;
+      if (handledDeepLinkRef.current !== key) {
+        const targetInq = inquiries.find((i) => i.id === inquiryParam || i.reference === inquiryParam);
+        if (targetInq) {
+          handledDeepLinkRef.current = key;
+          setPortalView('inquiries');
+          startConvertInquiry(targetInq);
+          setSearchParams({}, { replace: true });
+          return;
+        }
+      }
+    }
+
     const statusParam = searchParams.get('status') as BookingStatus | null;
     if (statusParam && STATUS_FILTERS.includes(statusParam)) {
+      setPortalView('bookings');
       setStatusFilter(statusParam);
       setSearchParams({}, { replace: true });
       return;
@@ -179,13 +257,13 @@ export default function AdminBookingsPage() {
         setNewPickupDate(dateParam);
         setNewReturnDate(dateParam);
       }
+      setConvertingInquiryId(null);
       setShowNewModal(true);
       setSearchParams({}, { replace: true });
       return;
     }
 
     const refParam = searchParams.get('ref');
-    const tabParam = searchParams.get('tab') as InspectionTab | null;
     if (!refParam || bookings.length === 0) return;
     const key = `${refParam}:${tabParam || ''}`;
     if (handledDeepLinkRef.current === key) return;
@@ -194,15 +272,38 @@ export default function AdminBookingsPage() {
     );
     if (target) {
       handledDeepLinkRef.current = key;
+      setPortalView('bookings');
       openDetail(
         target,
         tabParam === 'handover' || tabParam === 'return' || tabParam === 'compare'
-          ? tabParam
+          ? (tabParam as InspectionTab)
           : undefined
       );
       setSearchParams({}, { replace: true });
     }
-  }, [bookings, vehicles, searchParams, setSearchParams]);
+  }, [bookings, vehicles, inquiries, searchParams, setSearchParams]);
+
+  const openInquiriesCount = useMemo(
+    () => inquiries.filter((i) => i.status === 'New' || i.status === 'Contacted').length,
+    [inquiries]
+  );
+
+  const filteredInquiries = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return inquiries
+      .filter((i) => {
+        if (inquiryFilter === 'Open') {
+          if (i.status !== 'New' && i.status !== 'Contacted') return false;
+        } else if (inquiryFilter !== 'All' && i.status !== inquiryFilter) {
+          return false;
+        }
+        if (!q) return true;
+        return `${i.reference} ${i.name} ${i.organization || ''} ${i.phone || ''} ${i.email || ''} ${i.topic} ${i.vehicleClass} ${i.message}`
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) => b.reference.localeCompare(a.reference));
+  }, [inquiries, inquiryFilter, searchQuery]);
 
   const filteredBookings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -230,29 +331,7 @@ export default function AdminBookingsPage() {
         0,
         120
       );
-      const stampNow = formatStampNow();
-
-      const payload: Record<string, unknown> = {
-        ...selectedBooking,
-        vehicleId: chosenVehicle ? chosenVehicle.id : selectedBooking.vehicleId,
-        vehicleName: chosenVehicle ? chosenVehicle.name : selectedBooking.vehicleName,
-        registrationPlate: chosenVehicle
-          ? chosenVehicle.registrationPlate
-          : selectedBooking.registrationPlate || '',
-        status: finalStatus,
-        updatedAt: serverTimestamp(),
-      };
-      delete payload.id;
-
-      if (chosenDriver) {
-        payload.driverId = chosenDriver.id;
-        payload.driverName = chosenDriver.fullName;
-        payload.driverPhone = chosenDriver.phone;
-      } else {
-        delete payload.driverId;
-        delete payload.driverName;
-        delete payload.driverPhone;
-      }
+      const stampNow = formatStampNow().slice(0, 40);
 
       const cleanOdoOut = odometerOut.trim() ? Math.max(0, Math.round(Number(odometerOut))) : null;
       const cleanOdoIn = odometerIn.trim() ? Math.max(0, Math.round(Number(odometerIn))) : null;
@@ -261,89 +340,223 @@ export default function AdminBookingsPage() {
       const cleanReturnPassed = sanitizeInspectionIds(returnPassed);
       const cleanReturnFlagged = sanitizeInspectionIds(returnFlagged);
 
-      if (cleanOdoOut !== null && Number.isFinite(cleanOdoOut)) {
-        payload.odometerOut = cleanOdoOut;
+      const bookingPatch: Record<string, unknown> = {
+        vehicleId: (chosenVehicle ? chosenVehicle.id : selectedBooking.vehicleId).slice(0, 80),
+        vehicleName: (chosenVehicle ? chosenVehicle.name : selectedBooking.vehicleName).slice(
+          0,
+          100
+        ),
+        registrationPlate: (chosenVehicle
+          ? chosenVehicle.registrationPlate
+          : selectedBooking.registrationPlate || ''
+        ).slice(0, 20),
+        status: finalStatus,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (chosenDriver) {
+        bookingPatch.driverId = chosenDriver.id.slice(0, 80);
+        bookingPatch.driverName = chosenDriver.fullName.slice(0, 100);
+        bookingPatch.driverPhone = chosenDriver.phone.slice(0, 30);
       } else {
-        delete payload.odometerOut;
-      }
-      if (fuelOut.trim()) payload.fuelOut = fuelOut.trim().slice(0, 40);
-      if (conditionOut.trim()) {
-        payload.conditionOut = conditionOut.trim().slice(0, 300);
-      } else {
-        delete payload.conditionOut;
-      }
-      if (cleanHandoverPassed.length > 0 || cleanHandoverFlagged.length > 0) {
-        payload.handoverPassedItems = cleanHandoverPassed;
-        payload.handoverFlaggedItems = cleanHandoverFlagged;
-      } else {
-        delete payload.handoverPassedItems;
-        delete payload.handoverFlaggedItems;
+        bookingPatch.driverId = deleteField();
+        bookingPatch.driverName = deleteField();
+        bookingPatch.driverPhone = deleteField();
       }
 
+      if (cleanOdoOut !== null && Number.isFinite(cleanOdoOut)) {
+        bookingPatch.odometerOut = cleanOdoOut;
+      } else {
+        bookingPatch.odometerOut = deleteField();
+      }
+      bookingPatch.fuelOut = fuelOut.trim() ? fuelOut.trim().slice(0, 40) : deleteField();
+      bookingPatch.conditionOut = conditionOut.trim()
+        ? conditionOut.trim().slice(0, 300)
+        : deleteField();
+
+      bookingPatch.handoverPassedItems =
+        cleanHandoverPassed.length > 0 ? cleanHandoverPassed : deleteField();
+      bookingPatch.handoverFlaggedItems =
+        cleanHandoverFlagged.length > 0 ? cleanHandoverFlagged : deleteField();
+
       if (
-        nextStatus === 'Active' ||
-        inspectionTab === 'handover' ||
-        cleanHandoverPassed.length > 0 ||
-        cleanOdoOut !== null
+        (nextStatus === 'Active' ||
+          inspectionTab === 'handover' ||
+          cleanHandoverPassed.length > 0 ||
+          cleanOdoOut !== null) &&
+        (cleanHandoverPassed.length > 0 || cleanOdoOut !== null || nextStatus === 'Active')
       ) {
-        if (cleanHandoverPassed.length > 0 || cleanOdoOut !== null || nextStatus === 'Active') {
-          payload.handoverCompletedBy = inspectorName;
-          payload.handoverCompletedAt = stampNow;
-        }
+        bookingPatch.handoverCompletedBy = inspectorName;
+        bookingPatch.handoverCompletedAt = stampNow;
       }
 
       if (cleanOdoIn !== null && Number.isFinite(cleanOdoIn)) {
-        payload.odometerIn = cleanOdoIn;
+        bookingPatch.odometerIn = cleanOdoIn;
       } else {
-        delete payload.odometerIn;
+        bookingPatch.odometerIn = deleteField();
       }
-      if (fuelIn.trim()) payload.fuelIn = fuelIn.trim().slice(0, 40);
-      if (damageNotes.trim()) {
-        payload.damageNotes = damageNotes.trim().slice(0, 300);
-      } else {
-        delete payload.damageNotes;
-      }
-      if (cleanReturnPassed.length > 0 || cleanReturnFlagged.length > 0) {
-        payload.returnPassedItems = cleanReturnPassed;
-        payload.returnFlaggedItems = cleanReturnFlagged;
-      } else {
-        delete payload.returnPassedItems;
-        delete payload.returnFlaggedItems;
-      }
+      bookingPatch.fuelIn = fuelIn.trim() ? fuelIn.trim().slice(0, 40) : deleteField();
+      bookingPatch.damageNotes = damageNotes.trim()
+        ? damageNotes.trim().slice(0, 300)
+        : deleteField();
+
+      bookingPatch.returnPassedItems =
+        cleanReturnPassed.length > 0 ? cleanReturnPassed : deleteField();
+      bookingPatch.returnFlaggedItems =
+        cleanReturnFlagged.length > 0 ? cleanReturnFlagged : deleteField();
 
       if (
-        nextStatus === 'Completed' ||
-        inspectionTab === 'return' ||
-        cleanReturnPassed.length > 0 ||
-        cleanOdoIn !== null
+        (nextStatus === 'Completed' ||
+          inspectionTab === 'return' ||
+          cleanReturnPassed.length > 0 ||
+          cleanOdoIn !== null) &&
+        (cleanReturnPassed.length > 0 || cleanOdoIn !== null || nextStatus === 'Completed')
       ) {
-        if (cleanReturnPassed.length > 0 || cleanOdoIn !== null || nextStatus === 'Completed') {
-          payload.returnCompletedBy = inspectorName;
-          payload.returnCompletedAt = stampNow;
-        }
+        bookingPatch.returnCompletedBy = inspectorName;
+        bookingPatch.returnCompletedAt = stampNow;
       }
 
-      await updateDoc(doc(db, 'bookings', selectedBooking.id), payload);
+      if (isDemoMode) {
+        const handoverStampNeeded =
+          (nextStatus === 'Active' ||
+            inspectionTab === 'handover' ||
+            cleanHandoverPassed.length > 0 ||
+            cleanOdoOut !== null) &&
+          (cleanHandoverPassed.length > 0 || cleanOdoOut !== null || nextStatus === 'Active');
+
+        const returnStampNeeded =
+          (nextStatus === 'Completed' ||
+            inspectionTab === 'return' ||
+            cleanReturnPassed.length > 0 ||
+            cleanOdoIn !== null) &&
+          (cleanReturnPassed.length > 0 || cleanOdoIn !== null || nextStatus === 'Completed');
+
+        const updatedBooking: BookingDoc = {
+          ...selectedBooking,
+          vehicleId: (chosenVehicle ? chosenVehicle.id : selectedBooking.vehicleId).slice(0, 80),
+          vehicleName: (chosenVehicle ? chosenVehicle.name : selectedBooking.vehicleName).slice(
+            0,
+            100
+          ),
+          registrationPlate: (chosenVehicle
+            ? chosenVehicle.registrationPlate
+            : selectedBooking.registrationPlate || ''
+          ).slice(0, 20),
+          status: finalStatus,
+          driverId: chosenDriver ? chosenDriver.id.slice(0, 80) : undefined,
+          driverName: chosenDriver ? chosenDriver.fullName.slice(0, 100) : undefined,
+          driverPhone: chosenDriver ? chosenDriver.phone.slice(0, 30) : undefined,
+          odometerOut: cleanOdoOut !== null && Number.isFinite(cleanOdoOut) ? cleanOdoOut : undefined,
+          fuelOut: fuelOut.trim() ? fuelOut.trim().slice(0, 40) : undefined,
+          conditionOut: conditionOut.trim() ? conditionOut.trim().slice(0, 300) : undefined,
+          handoverPassedItems: cleanHandoverPassed.length > 0 ? cleanHandoverPassed : undefined,
+          handoverFlaggedItems: cleanHandoverFlagged.length > 0 ? cleanHandoverFlagged : undefined,
+          handoverCompletedBy: handoverStampNeeded
+            ? inspectorName
+            : selectedBooking.handoverCompletedBy,
+          handoverCompletedAt: handoverStampNeeded
+            ? stampNow
+            : selectedBooking.handoverCompletedAt,
+          odometerIn: cleanOdoIn !== null && Number.isFinite(cleanOdoIn) ? cleanOdoIn : undefined,
+          fuelIn: fuelIn.trim() ? fuelIn.trim().slice(0, 40) : undefined,
+          damageNotes: damageNotes.trim() ? damageNotes.trim().slice(0, 300) : undefined,
+          returnPassedItems: cleanReturnPassed.length > 0 ? cleanReturnPassed : undefined,
+          returnFlaggedItems: cleanReturnFlagged.length > 0 ? cleanReturnFlagged : undefined,
+          returnCompletedBy: returnStampNeeded ? inspectorName : selectedBooking.returnCompletedBy,
+          returnCompletedAt: returnStampNeeded ? stampNow : selectedBooking.returnCompletedAt,
+        };
+
+        demo.setBookings((prev) =>
+          prev.map((item) => (item.id === selectedBooking.id ? updatedBooking : item))
+        );
+
+        if (chosenVehicle && (finalStatus === 'Active' || finalStatus === 'Completed')) {
+          demo.setVehicles((prev) =>
+            prev.map((vItem) =>
+              vItem.id === chosenVehicle.id
+                ? {
+                    ...vItem,
+                    status: finalStatus === 'Active' ? 'Booked' : 'Available',
+                    currentOdometerKm:
+                      finalStatus === 'Completed' &&
+                      cleanOdoIn !== null &&
+                      Number.isFinite(cleanOdoIn)
+                        ? cleanOdoIn
+                        : Math.max(0, Number(chosenVehicle.currentOdometerKm) || 0),
+                  }
+                : vItem
+            )
+          );
+        }
+
+        if (chosenDriver && (finalStatus === 'Active' || finalStatus === 'Completed')) {
+          demo.setDrivers((prev) =>
+            prev.map((dItem) =>
+              dItem.id === chosenDriver.id
+                ? {
+                    ...dItem,
+                    status: finalStatus === 'Active' ? 'On Trip' : 'Available',
+                    tripCount:
+                      finalStatus === 'Completed'
+                        ? (Number(chosenDriver.tripCount) || 0) + 1
+                        : Number(chosenDriver.tripCount) || 0,
+                  }
+                : dItem
+            )
+          );
+        }
+
+        if (nextStatus === 'Active') {
+          setInspectionTab('return');
+          setSaveNotice('Vehicle dispatched and departure checklist logged.');
+        } else if (nextStatus === 'Completed') {
+          setInspectionTab('compare');
+          setSaveNotice('Return inspection saved and trip closed.');
+        } else {
+          setSaveNotice('Inspection checklist and assignment saved.');
+        }
+        return;
+      }
+
+      try {
+        await updateDoc(doc(db, 'bookings', selectedBooking.id), bookingPatch);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `bookings/${selectedBooking.id}`);
+      }
 
       // Sync vehicle and driver statuses on Dispatch / Complete
       if (chosenVehicle && (finalStatus === 'Active' || finalStatus === 'Completed')) {
-        await updateDoc(doc(db, 'vehicles', chosenVehicle.id), {
-          status: finalStatus === 'Active' ? 'Booked' : 'Available',
-          currentOdometerKm:
-            finalStatus === 'Completed' && cleanOdoIn !== null && Number.isFinite(cleanOdoIn)
-              ? cleanOdoIn
-              : chosenVehicle.currentOdometerKm,
-          updatedAt: serverTimestamp(),
-        });
+        try {
+          const vehiclePatch: Record<string, unknown> = {
+            status: finalStatus === 'Active' ? 'Booked' : 'Available',
+            currentOdometerKm:
+              finalStatus === 'Completed' && cleanOdoIn !== null && Number.isFinite(cleanOdoIn)
+                ? cleanOdoIn
+                : Math.max(0, Number(chosenVehicle.currentOdometerKm) || 0),
+            updatedAt: serverTimestamp(),
+          };
+          if (chosenVehicle.selfDriveRateKes === undefined) {
+            vehiclePatch.selfDriveRateKes = 0;
+          }
+          await updateDoc(doc(db, 'vehicles', chosenVehicle.id), vehiclePatch);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `vehicles/${chosenVehicle.id}`);
+        }
       }
 
       if (chosenDriver && (finalStatus === 'Active' || finalStatus === 'Completed')) {
-        await updateDoc(doc(db, 'drivers', chosenDriver.id), {
-          status: finalStatus === 'Active' ? 'On Trip' : 'Available',
-          tripCount:
-            finalStatus === 'Completed' ? (chosenDriver.tripCount || 0) + 1 : chosenDriver.tripCount,
-          updatedAt: serverTimestamp(),
-        });
+        try {
+          await updateDoc(doc(db, 'drivers', chosenDriver.id), {
+            status: finalStatus === 'Active' ? 'On Trip' : 'Available',
+            tripCount:
+              finalStatus === 'Completed'
+                ? (Number(chosenDriver.tripCount) || 0) + 1
+                : Number(chosenDriver.tripCount) || 0,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `drivers/${chosenDriver.id}`);
+        }
       }
 
       if (nextStatus === 'Active') {
@@ -355,8 +568,6 @@ export default function AdminBookingsPage() {
       } else {
         setSaveNotice('Inspection checklist and assignment saved.');
       }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `bookings/${selectedBooking.id}`);
     } finally {
       setSavingDrawer(false);
     }
@@ -374,39 +585,99 @@ export default function AdminBookingsPage() {
 
     const start = new Date(`${newPickupDate}T00:00:00`);
     const end = new Date(`${newReturnDate}T00:00:00`);
-    const days =
+    const rawDays =
       newService === 'airport-transfer'
         ? 1
         : Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
-    const quoted =
+    const days = Math.min(365, Math.max(1, Number.isFinite(rawDays) ? rawDays : 1));
+    const quotedRaw =
       newService === 'airport-transfer'
         ? v.dailyRateKes
         : (newService === 'self-drive' && v.selfDriveRateKes ? v.selfDriveRateKes : v.dailyRateKes) *
           days;
+    const quoted = Math.max(0, Number(quotedRaw) || 0);
 
     const id = `bk_${Date.now()}`;
     const bookingRef = `KCH-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
+    const newRecord: BookingDoc = {
+      id,
+      bookingRef,
+      serviceType: newService,
+      vehicleId: v.id.slice(0, 80),
+      vehicleName: v.name.slice(0, 100),
+      registrationPlate: (v.registrationPlate || '').slice(0, 20),
+      pickupLocation: (newPickup.trim() || 'Kisumu CBD').slice(0, 200),
+      destination: (newDest.trim() || 'Kisumu').slice(0, 200),
+      pickupDate: newPickupDate.slice(0, 20),
+      pickupTime: '08:00',
+      returnDate: (newService === 'airport-transfer' ? newPickupDate : newReturnDate).slice(0, 20),
+      returnTime: '17:00',
+      rentalDays: days,
+      flightNumber: newFlight.trim().slice(0, 40),
+      notes: newNotes.trim().slice(0, 500),
+      clientName: newClientName.trim().slice(0, 120),
+      clientPhone: newClientPhone.trim().slice(0, 30),
+      clientEmail: newClientEmail.trim().slice(0, 120),
+      quotedAmountKes: quoted,
+      amountPaidKes: 0,
+      paymentStatus: 'Unpaid',
+      status: 'Confirmed',
+      source: newSource,
+    };
+
+    const handlerName = (staffProfile?.fullName || staffProfile?.email || 'Kisumu Dispatch').slice(
+      0,
+      120
+    );
+
+    if (isDemoMode) {
+      demo.setBookings((prev) => [newRecord, ...prev]);
+      if (convertingInquiryId) {
+        demo.setInquiries((prev) =>
+          prev.map((item) =>
+            item.id === convertingInquiryId
+              ? {
+                  ...item,
+                  status: 'Converted',
+                  bookingRef: newRecord.bookingRef,
+                  handledBy: handlerName,
+                }
+              : item
+          )
+        );
+        setConvertingInquiryId(null);
+        setPortalView('bookings');
+      }
+      setShowNewModal(false);
+      setNewClientName('');
+      setNewClientPhone('+254 ');
+      setNewClientEmail('');
+      setNewFlight('');
+      setNewNotes('');
+      return;
+    }
+
     try {
       await setDoc(doc(db, 'bookings', id), {
-        bookingRef,
-        serviceType: newService,
-        vehicleId: v.id,
-        vehicleName: v.name,
-        registrationPlate: v.registrationPlate,
-        pickupLocation: newPickup.trim(),
-        destination: newDest.trim(),
-        pickupDate: newPickupDate,
-        pickupTime: '08:00',
-        returnDate: newService === 'airport-transfer' ? newPickupDate : newReturnDate,
-        returnTime: '17:00',
-        rentalDays: days,
-        flightNumber: newFlight.trim(),
-        notes: newNotes.trim(),
-        clientName: newClientName.trim(),
-        clientPhone: newClientPhone.trim(),
-        clientEmail: newClientEmail.trim(),
-        quotedAmountKes: quoted,
+        bookingRef: newRecord.bookingRef,
+        serviceType: newRecord.serviceType,
+        vehicleId: newRecord.vehicleId,
+        vehicleName: newRecord.vehicleName,
+        registrationPlate: newRecord.registrationPlate,
+        pickupLocation: newRecord.pickupLocation,
+        destination: newRecord.destination,
+        pickupDate: newRecord.pickupDate,
+        pickupTime: newRecord.pickupTime,
+        returnDate: newRecord.returnDate,
+        returnTime: newRecord.returnTime,
+        rentalDays: newRecord.rentalDays,
+        flightNumber: newRecord.flightNumber,
+        notes: newRecord.notes,
+        clientName: newRecord.clientName,
+        clientPhone: newRecord.clientPhone,
+        clientEmail: newRecord.clientEmail,
+        quotedAmountKes: newRecord.quotedAmountKes,
         amountPaidKes: 0,
         paymentStatus: 'Unpaid',
         status: 'Confirmed',
@@ -414,6 +685,22 @@ export default function AdminBookingsPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      if (convertingInquiryId) {
+        try {
+          await updateDoc(doc(db, 'inquiries', convertingInquiryId), {
+            status: 'Converted',
+            bookingRef: newRecord.bookingRef,
+            handledBy: handlerName,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (inqErr) {
+          handleFirestoreError(inqErr, OperationType.UPDATE, `inquiries/${convertingInquiryId}`);
+        }
+        setConvertingInquiryId(null);
+        setPortalView('bookings');
+      }
+
       setShowNewModal(false);
       setNewClientName('');
       setNewClientPhone('+254 ');
@@ -422,6 +709,30 @@ export default function AdminBookingsPage() {
       setNewNotes('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `bookings/${id}`);
+    }
+  }
+
+  async function handleUpdateInquiryStatus(inq: InquiryDoc, nextStatus: InquiryStatus) {
+    const handlerName = (staffProfile?.fullName || staffProfile?.email || 'Kisumu Dispatch').slice(
+      0,
+      120
+    );
+    if (isDemoMode) {
+      demo.setInquiries((prev) =>
+        prev.map((item) =>
+          item.id === inq.id ? { ...item, status: nextStatus, handledBy: handlerName } : item
+        )
+      );
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'inquiries', inq.id), {
+        status: nextStatus,
+        handledBy: handlerName,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `inquiries/${inq.id}`);
     }
   }
 
@@ -436,9 +747,11 @@ export default function AdminBookingsPage() {
         : '',
       `• Pickup: ${bk.pickupLocation} on ${bk.pickupDate} at ${bk.pickupTime}`,
       `• Destination: ${bk.destination}`,
-      `• Quoted Total: ${formatKes(bk.quotedAmountKes)} (Balance: ${formatKes(
-        Math.max(0, bk.quotedAmountKes - bk.amountPaidKes)
-      )})`,
+      isAdmin
+        ? `• Quoted Total: ${formatKes(bk.quotedAmountKes)} (Balance: ${formatKes(
+            Math.max(0, bk.quotedAmountKes - bk.amountPaidKes)
+          )})`
+        : '',
       `Karibu! Questions: 0722 403 413.`,
     ]
       .filter(Boolean)
@@ -447,51 +760,230 @@ export default function AdminBookingsPage() {
   }
 
   return (
-    <AdminLayout title="Bookings & Reservations Manager" breadcrumb="Bookings">
+    <AdminLayout
+      title={isAdmin ? 'Bookings & Reservations Manager' : 'Dispatch Queue & Trip Assignments'}
+      breadcrumb="Bookings"
+    >
       <div className={`space-y-6 ${showPrintSlip ? 'print:hidden' : ''}`}>
-        {/* Toolbar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-1 p-1 bg-[#EFF3F9] rounded-lg border border-[#111827]/10">
-            {STATUS_FILTERS.map((st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
-                  statusFilter === st
-                    ? 'bg-[#194793] text-white'
-                    : 'text-[#4B5563] hover:text-[#111827]'
-                }`}
-              >
-                {st}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="w-4 h-4 text-[#4B5563] absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search ref, client, +254..."
-                className="w-full pl-9 pr-3 py-2 rounded-md border border-[#111827]/20 bg-white text-xs sm:text-sm focus:outline-none focus:border-[#194793]"
-              />
-            </div>
-
+        {/* Top Mode Switcher: Bookings Queue vs Contact Inquiries */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#111827]/10 pb-4">
+          <div className="flex items-center gap-1 p-1 bg-[#EFF3F9] rounded-lg border border-[#111827]/10">
             <button
               type="button"
-              onClick={() => setShowNewModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672] whitespace-nowrap"
+              onClick={() => setPortalView('bookings')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
+                portalView === 'bookings'
+                  ? 'bg-[#194793] text-white'
+                  : 'text-[#4B5563] hover:text-[#111827]'
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              <span>New Booking</span>
+              <ClipboardCheck className="w-4 h-4" aria-hidden="true" />
+              <span>Bookings Queue ({bookings.length})</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setPortalView('inquiries')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors ${
+                portalView === 'inquiries'
+                  ? 'bg-[#194793] text-white'
+                  : 'text-[#4B5563] hover:text-[#111827]'
+              }`}
+            >
+              <Inbox className="w-4 h-4" aria-hidden="true" />
+              <span>Contact Inquiries ({openInquiriesCount} open)</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setConvertingInquiryId(null);
+              setShowNewModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-[#194793] text-white text-xs sm:text-sm font-semibold hover:bg-[#133672] whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Booking</span>
+          </button>
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {portalView === 'bookings' ? (
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-[#EFF3F9] rounded-lg border border-[#111827]/10">
+              {STATUS_FILTERS.map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                    statusFilter === st
+                      ? 'bg-[#194793] text-white'
+                      : 'text-[#4B5563] hover:text-[#111827]'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-[#EFF3F9] rounded-lg border border-[#111827]/10">
+              {(['Open', 'New', 'Contacted', 'Converted', 'Archived', 'All'] as const).map(
+                (st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setInquiryFilter(st)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                      inquiryFilter === st
+                        ? 'bg-[#194793] text-white'
+                        : 'text-[#4B5563] hover:text-[#111827]'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                )
+              )}
+            </div>
+          )}
+
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 text-[#4B5563] absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={
+                portalView === 'bookings'
+                  ? 'Search ref, client, +254...'
+                  : 'Search inquiry ref, client, org...'
+              }
+              className="w-full pl-9 pr-3 py-2 rounded-md border border-[#111827]/20 bg-white text-xs sm:text-sm focus:outline-none focus:border-[#194793]"
+            />
           </div>
         </div>
 
-        {/* Bookings Table */}
+        {portalView === 'inquiries' ? (
+          <div className="rounded-lg border border-[#111827]/10 bg-white divide-y divide-[#111827]/10">
+            {filteredInquiries.length === 0 ? (
+              <div className="p-10 text-center space-y-2">
+                <p className="text-sm font-medium text-[#111827]">No matching inquiries found.</p>
+                <p className="text-xs text-[#4B5563]">
+                  Quick Inquiries submitted on the public Contact page appear here immediately.
+                </p>
+              </div>
+            ) : (
+              filteredInquiries.map((inq) => {
+                const digits = inq.phone ? cleanWhatsAppPhone(inq.phone) : '';
+                const waHref = digits
+                  ? `https://wa.me/${digits}?text=${encodeURIComponent(
+                      `Habari ${inq.name}, following up from Kechas Agencies Kisumu Dispatch on your ${inq.topic} inquiry (${inq.reference}).`
+                    )}`
+                  : '';
+                const isArchivedLocked = inq.status === 'Archived' && !isAdmin;
+                return (
+                  <div
+                    key={inq.id}
+                    className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-[#F9FAFB]"
+                  >
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-mono font-semibold text-[#194793]">
+                          {inq.reference}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span
+                          className={`font-semibold ${
+                            inq.status === 'New'
+                              ? 'text-[#D61C1C]'
+                              : inq.status === 'Contacted'
+                                ? 'text-[#194793]'
+                                : inq.status === 'Converted'
+                                  ? 'text-[#16A34A]'
+                                  : 'text-[#6B7280]'
+                          }`}
+                        >
+                          {inq.status}
+                        </span>
+                        {inq.bookingRef && (
+                          <span className="font-mono text-[#16A34A]">
+                            → Booking {inq.bookingRef}
+                          </span>
+                        )}
+                        <span aria-hidden="true">·</span>
+                        <span className="font-medium text-[#111827]">{inq.topic}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono text-[#4B5563] tabular-nums">
+                          {inq.travelDate || 'Flexible dates'}
+                        </span>
+                      </div>
+
+                      <p className="text-sm font-semibold text-[#111827]">
+                        {inq.name}
+                        {inq.organization ? ` (${inq.organization})` : ''} ·{' '}
+                        <span className="font-normal text-[#4B5563]">
+                          {[inq.phone, inq.email].filter(Boolean).join(' · ')}
+                        </span>
+                      </p>
+
+                      <p className="text-xs text-[#4B5563]">
+                        Requested: <span className="font-medium text-[#111827]">{inq.vehicleClass}</span>{' '}
+                        · Reply via <span className="font-medium text-[#111827]">{inq.replyVia}</span>
+                        {inq.handledBy ? ` · Handled by ${inq.handledBy}` : ''}
+                      </p>
+
+                      <p className="text-xs sm:text-sm text-[#111827] bg-[#F9FAFB] border border-[#111827]/10 rounded p-3">
+                        {inq.message}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {waHref && (
+                        <a
+                          href={waHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[#16A34A]/30 bg-[#F0FDF4] text-xs font-semibold text-[#15803D] hover:bg-[#DCFCE7] whitespace-nowrap"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>WhatsApp</span>
+                        </a>
+                      )}
+                      {inq.status === 'New' && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateInquiryStatus(inq, 'Contacted')}
+                          className="px-3 py-2 rounded-md border border-[#111827]/20 text-xs font-semibold text-[#111827] hover:bg-[#EFF3F9] whitespace-nowrap"
+                        >
+                          Mark Contacted
+                        </button>
+                      )}
+                      {inq.status !== 'Converted' && !isArchivedLocked && (
+                        <button
+                          type="button"
+                          onClick={() => startConvertInquiry(inq)}
+                          className="px-3.5 py-2 rounded-md bg-[#194793] text-white text-xs font-semibold hover:bg-[#133672] whitespace-nowrap"
+                        >
+                          Convert to Booking
+                        </button>
+                      )}
+                      {inq.status !== 'Archived' && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateInquiryStatus(inq, 'Archived')}
+                          className="px-3 py-2 rounded-md border border-[#111827]/15 text-xs text-[#4B5563] hover:text-[#111827] hover:bg-[#F9FAFB] whitespace-nowrap"
+                        >
+                          Archive
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ) : (
+        /* Bookings Table */
         <div className="rounded-lg border border-[#111827]/10 bg-white overflow-hidden">
           {filteredBookings.length === 0 ? (
             <div className="p-10 text-center space-y-2">
@@ -509,7 +1001,9 @@ export default function AdminBookingsPage() {
                     <th className="py-3 px-4">Client</th>
                     <th className="py-3 px-4">Vehicle & Driver</th>
                     <th className="py-3 px-4">Route & Dates</th>
-                    <th className="py-3 px-4 text-right">Quoted / Paid</th>
+                    <th className={`py-3 px-4 ${isAdmin ? 'text-right' : ''}`}>
+                      {isAdmin ? 'Quoted / Paid' : 'Service & Clearance'}
+                    </th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Action</th>
                   </tr>
@@ -545,14 +1039,23 @@ export default function AdminBookingsPage() {
                           {b.pickupDate} → {b.returnDate} ({b.rentalDays}d)
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums">
-                        <div className="font-semibold text-[#111827]">
-                          {formatKes(b.quotedAmountKes)}
-                        </div>
-                        <div className="text-[11px] text-[#4B5563]">
-                          Paid: {formatKes(b.amountPaidKes)}
-                        </div>
-                      </td>
+                      {isAdmin ? (
+                        <td className="py-3 px-4 text-right font-mono tabular-nums">
+                          <div className="font-semibold text-[#111827]">
+                            {formatKes(b.quotedAmountKes)}
+                          </div>
+                          <div className="text-[11px] text-[#4B5563]">
+                            Paid: {formatKes(b.amountPaidKes)}
+                          </div>
+                        </td>
+                      ) : (
+                        <td className="py-3 px-4">
+                          <div className="font-medium text-[#111827] capitalize">
+                            {b.serviceType.replace('-', ' ')}
+                          </div>
+                          <div className="text-[11px] text-[#4B5563]">{b.paymentStatus}</div>
+                        </td>
+                      )}
                       <td className="py-3 px-4">
                         <span
                           className={`text-xs font-semibold ${
@@ -609,6 +1112,7 @@ export default function AdminBookingsPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Detail Drawer */}
@@ -667,16 +1171,25 @@ export default function AdminBookingsPage() {
                   </span>
                 )}
               </div>
-              <div className="font-mono tabular-nums">
-                <span className="text-[#4B5563]">Quote: </span>
-                <span className="font-semibold text-[#194793]">
-                  {formatKes(selectedBooking.quotedAmountKes)}
-                </span>
-                <span className="text-[#4B5563]">
-                  {' '}
-                  · Paid: {formatKes(selectedBooking.amountPaidKes)} ({selectedBooking.paymentStatus})
-                </span>
-              </div>
+              {isAdmin ? (
+                <div className="font-mono tabular-nums">
+                  <span className="text-[#4B5563]">Quote: </span>
+                  <span className="font-semibold text-[#194793]">
+                    {formatKes(selectedBooking.quotedAmountKes)}
+                  </span>
+                  <span className="text-[#4B5563]">
+                    {' '}
+                    · Paid: {formatKes(selectedBooking.amountPaidKes)} ({selectedBooking.paymentStatus})
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <span className="text-[#4B5563]">Payment Clearance: </span>
+                  <span className="font-semibold text-[#194793]">
+                    {selectedBooking.paymentStatus}
+                  </span>
+                </div>
+              )}
               {selectedBooking.notes && (
                 <p className="text-xs text-[#4B5563] pt-1">Notes: {selectedBooking.notes}</p>
               )}
@@ -910,7 +1423,8 @@ export default function AdminBookingsPage() {
               >
                 {vehicles.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.name} ({v.registrationPlate}) — {formatKes(v.dailyRateKes)}/day
+                    {v.name} ({v.registrationPlate}) —{' '}
+                    {isAdmin ? `${formatKes(v.dailyRateKes)}/day` : v.status}
                   </option>
                 ))}
               </select>

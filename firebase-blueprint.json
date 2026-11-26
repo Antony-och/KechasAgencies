@@ -261,6 +261,29 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["quote", "clientName", "role", "context", "route", "updatedAt"]
+    },
+    "Inquiry": {
+      "title": "Dispatch Quick Inquiry",
+      "description": "Customer inquiry submitted from the public Contact page and routed into Kisumu Dispatch.",
+      "type": "object",
+      "properties": {
+        "reference": { "type": "string", "maxLength": 20 },
+        "topic": { "type": "string", "enum": ["Vehicle Hire", "KIS Airport Pickup", "Corporate / NGO", "Custom Route"] },
+        "name": { "type": "string", "maxLength": 120 },
+        "organization": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 120 },
+        "vehicleClass": { "type": "string", "maxLength": 120 },
+        "travelDate": { "type": "string", "maxLength": 20 },
+        "replyVia": { "type": "string", "enum": ["WhatsApp", "Phone Call", "Email"] },
+        "message": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["New", "Contacted", "Converted", "Archived"] },
+        "bookingRef": { "type": "string", "maxLength": 30 },
+        "handledBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reference", "topic", "name", "vehicleClass", "replyVia", "message", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -311,6 +334,10 @@
     "/testimonials/{testimonialId}": {
       "schema": { "$ref": "#/entities/TestimonialItem" },
       "description": "Homepage client testimonials."
+    },
+    "/inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/Inquiry" },
+      "description": "Customer quick inquiries submitted from /contact for dispatcher follow-up."
     }
   }
 }

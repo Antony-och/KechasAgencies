@@ -1,24 +1,23 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FLEET_VEHICLES, Vehicle } from '../data/fleet';
 import { DESTINATIONS, DestinationGuide } from '../data/destinations';
-import { JOURNAL_ARTICLES, JournalArticle } from '../data/journal';
 import { TESTIMONIALS, Testimonial } from '../data/testimonials';
 import { SITE_CONFIG } from '../data/site';
 import {
   DestinationDoc,
-  JournalPostDoc,
   SiteSettingsDoc,
   TestimonialDoc,
   VehicleDoc,
 } from '../lib/adminTypes';
+import { useAuth } from './AuthContext';
+import { useDemoPortal } from './DemoPortalContext';
 
 interface SiteDataContextValue {
   settings: SiteSettingsDoc;
   vehicles: Vehicle[];
   destinations: DestinationGuide[];
-  journal: JournalArticle[];
   testimonials: Testimonial[];
   isFleetSynced: boolean;
   buildWhatsAppHref: (customMessage?: string) => string;
@@ -50,11 +49,70 @@ function makeFallbackVehicles(): Vehicle[] {
   }));
 }
 
+function mapVehicleDocs(docs: VehicleDoc[]): Vehicle[] {
+  return docs
+    .filter((v) => v.status !== 'Inactive')
+    .map((v) => ({
+      id: v.id,
+      name: v.name,
+      category: v.category,
+      categoryLabel: v.categoryLabel,
+      registrationPlate: v.registrationPlate,
+      image: v.image,
+      passengers: v.passengers,
+      luggage: v.luggage,
+      transmission: v.transmission === 'Automatic 4WD' ? 'Automatic 4WD' : 'Automatic',
+      fuelType: v.fuelType === 'Diesel' ? 'Diesel' : 'Petrol',
+      terrain: v.terrain,
+      chauffeurAvailable: v.chauffeurAvailable,
+      selfDriveAvailable: v.selfDriveAvailable,
+      dailyRateKes: v.dailyRateKes,
+      selfDriveRateKes: v.selfDriveRateKes,
+      status: v.status,
+      highlight: v.highlight,
+      idealFor: [v.registrationPlate],
+    }));
+}
+
+function mergeDestinationDocs(docs: DestinationDoc[]): DestinationGuide[] {
+  const bySlug = new Map<string, DestinationGuide>();
+  docs.forEach((raw) => {
+    const staticMatch = DESTINATIONS.find((item) => item.slug === raw.slug);
+    bySlug.set(raw.slug, {
+      slug: raw.slug,
+      name: raw.name,
+      county: raw.county,
+      category: staticMatch?.category,
+      distanceFromKisumu: raw.distanceFromKisumu,
+      driveTime: raw.driveTime,
+      recommendedVehicle: raw.recommendedVehicle,
+      recommendedVehicleId: raw.recommendedVehicleId,
+      image: raw.image,
+      summary: raw.summary,
+      roadConditions: raw.roadConditions,
+      localTips: (raw.localTipsText || '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      featuredOnHome: raw.featuredOnHome,
+    });
+  });
+
+  const merged: DestinationGuide[] = DESTINATIONS.map(
+    (fallback) => bySlug.get(fallback.slug) ?? fallback
+  );
+  bySlug.forEach((docItem, slug) => {
+    if (!DESTINATIONS.some((item) => item.slug === slug)) {
+      merged.push(docItem);
+    }
+  });
+  return merged;
+}
+
 const SiteDataContext = createContext<SiteDataContextValue>({
   settings: DEFAULT_SETTINGS,
   vehicles: makeFallbackVehicles(),
   destinations: DESTINATIONS,
-  journal: JOURNAL_ARTICLES,
   testimonials: TESTIMONIALS,
   isFleetSynced: false,
   buildWhatsAppHref: (msg?: string) =>
@@ -64,12 +122,14 @@ const SiteDataContext = createContext<SiteDataContextValue>({
 });
 
 export function SiteDataProvider({ children }: { children: ReactNode }) {
+  const { isDemoMode } = useAuth();
+  const demo = useDemoPortal();
+
   const [settings, setSettings] = useState<SiteSettingsDoc>(DEFAULT_SETTINGS);
-  const [vehicles, setVehicles] = useState<Vehicle[]>(makeFallbackVehicles);
-  const [destinations, setDestinations] = useState<DestinationGuide[]>(DESTINATIONS);
-  const [journal, setJournal] = useState<JournalArticle[]>(JOURNAL_ARTICLES);
-  const [testimonials, setTestimonials] = useState<Testimonial[]>(TESTIMONIALS);
-  const [isFleetSynced, setIsFleetSynced] = useState(false);
+  const [liveVehicles, setLiveVehicles] = useState<Vehicle[]>(makeFallbackVehicles);
+  const [liveDestinations, setLiveDestinations] = useState<DestinationGuide[]>(DESTINATIONS);
+  const [liveTestimonials, setLiveTestimonials] = useState<Testimonial[]>(TESTIMONIALS);
+  const [liveFleetSynced, setLiveFleetSynced] = useState(false);
 
   useEffect(() => {
     const unsubSettings = onSnapshot(
@@ -90,32 +150,10 @@ export function SiteDataProvider({ children }: { children: ReactNode }) {
       (snap) => {
         if (!snap.empty || hasSyncedVehicles) {
           hasSyncedVehicles = true;
-          const mapped: Vehicle[] = snap.docs
-            .map((d) => ({ ...(d.data() as VehicleDoc), id: d.id }))
-            .filter((v) => v.status !== 'Inactive')
-            .map((v) => ({
-              id: v.id,
-              name: v.name,
-              category: v.category,
-              categoryLabel: v.categoryLabel,
-              registrationPlate: v.registrationPlate,
-              image: v.image,
-              passengers: v.passengers,
-              luggage: v.luggage,
-              transmission:
-                v.transmission === 'Automatic 4WD' ? 'Automatic 4WD' : 'Automatic',
-              fuelType: v.fuelType === 'Diesel' ? 'Diesel' : 'Petrol',
-              terrain: v.terrain,
-              chauffeurAvailable: v.chauffeurAvailable,
-              selfDriveAvailable: v.selfDriveAvailable,
-              dailyRateKes: v.dailyRateKes,
-              selfDriveRateKes: v.selfDriveRateKes,
-              status: v.status,
-              highlight: v.highlight,
-              idealFor: [v.registrationPlate],
-            }));
-          setVehicles(mapped);
-          setIsFleetSynced(true);
+          setLiveVehicles(
+            mapVehicleDocs(snap.docs.map((d) => ({ ...(d.data() as VehicleDoc), id: d.id })))
+          );
+          setLiveFleetSynced(true);
         }
       },
       () => {}
@@ -125,67 +163,9 @@ export function SiteDataProvider({ children }: { children: ReactNode }) {
       collection(db, 'destinations'),
       (snap) => {
         if (!snap.empty) {
-          const mapped: DestinationGuide[] = snap.docs.map((d) => {
-            const raw = d.data() as DestinationDoc;
-            return {
-              slug: raw.slug,
-              name: raw.name,
-              county: raw.county,
-              distanceFromKisumu: raw.distanceFromKisumu,
-              driveTime: raw.driveTime,
-              recommendedVehicle: raw.recommendedVehicle,
-              recommendedVehicleId: raw.recommendedVehicleId,
-              image: raw.image,
-              summary: raw.summary,
-              roadConditions: raw.roadConditions,
-              localTips: (raw.localTipsText || '')
-                .split('\n')
-                .map((s) => s.trim())
-                .filter(Boolean),
-              featuredOnHome: raw.featuredOnHome,
-            };
-          });
-          setDestinations(mapped);
-        }
-      },
-      () => {}
-    );
-
-    const unsubJournal = onSnapshot(
-      collection(db, 'journal'),
-      (snap) => {
-        if (!snap.empty) {
-          const mapped: JournalArticle[] = snap.docs.map((d) => {
-            const raw = d.data() as JournalPostDoc;
-            const paragraphs = raw.body
-              .split('\n\n')
-              .map((p) => p.trim())
-              .filter(Boolean);
-            return {
-              slug: raw.slug,
-              title: raw.title,
-              category: raw.category,
-              publishedAt: raw.publishedAt,
-              readTime: raw.readTime,
-              image: raw.image,
-              excerpt: raw.excerpt,
-              sections: paragraphs.map((p, idx) => {
-                const lines = p.split('\n');
-                if (lines.length > 1 && lines[0].length <= 90) {
-                  return {
-                    heading: lines[0].trim(),
-                    body: lines.slice(1).join('\n').trim(),
-                  };
-                }
-                return {
-                  heading: `Dispatch Note ${idx + 1}`,
-                  body: p,
-                };
-              }),
-              recommendedRouteSlug: raw.recommendedRouteSlug || 'lake-victoria-circuit',
-            };
-          });
-          setJournal(mapped);
+          setLiveDestinations(
+            mergeDestinationDocs(snap.docs.map((d) => ({ ...(d.data() as DestinationDoc), id: d.id })))
+          );
         }
       },
       () => {}
@@ -206,7 +186,7 @@ export function SiteDataProvider({ children }: { children: ReactNode }) {
               route: raw.route,
             };
           });
-          setTestimonials(mapped);
+          setLiveTestimonials(mapped);
         }
       },
       () => {}
@@ -216,10 +196,36 @@ export function SiteDataProvider({ children }: { children: ReactNode }) {
       unsubSettings();
       unsubVehicles();
       unsubDestinations();
-      unsubJournal();
       unsubTestimonials();
     };
   }, []);
+
+  const vehicles = useMemo(
+    () => (isDemoMode ? mapVehicleDocs(demo.vehicles) : liveVehicles),
+    [isDemoMode, demo.vehicles, liveVehicles]
+  );
+
+  const destinations = useMemo(
+    () => (isDemoMode ? mergeDestinationDocs(demo.destinations) : liveDestinations),
+    [isDemoMode, demo.destinations, liveDestinations]
+  );
+
+  const testimonials = useMemo(
+    () =>
+      isDemoMode
+        ? demo.testimonials.map((t) => ({
+            id: t.id,
+            quote: t.quote,
+            clientName: t.clientName,
+            role: t.role,
+            context: t.context,
+            route: t.route,
+          }))
+        : liveTestimonials,
+    [isDemoMode, demo.testimonials, liveTestimonials]
+  );
+
+  const isFleetSynced = isDemoMode ? true : liveFleetSynced;
 
   const buildWhatsAppHref = (customMessage?: string) => {
     const digits = settings.whatsappNumber.replace(/\D/g, '') || SITE_CONFIG.whatsappNumber;
@@ -233,7 +239,6 @@ export function SiteDataProvider({ children }: { children: ReactNode }) {
         settings,
         vehicles,
         destinations,
-        journal,
         testimonials,
         isFleetSynced,
         buildWhatsAppHref,
